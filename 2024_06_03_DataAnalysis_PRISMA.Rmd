@@ -1,0 +1,2287 @@
+---
+title: "Statistical analysis : Carlos Celis-Preciado <br><br>"
+subtitle:
+  "Project : PRISMA <br>"
+author: "Reference number : 0819 <br><br> Par : Samuel Lemaire-Paquette, statistician"
+date: " Last updated : `r Sys.Date()`<br><br>"
+output: 
+  html_document:
+    theme : united
+    df_print: paged
+    toc: true
+    number_sections: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+# Define variable containing url
+url <- "https://www.crchus.ca/clients/SanteEstrie/Sous-sites/Centres_de_recherche/CRCHUS/Medias-publications/signature_CR-CHUS_rvb-s2.jpg"
+```
+
+<script>
+   $(document).ready(function() {
+     $head = $('#header');
+     $head.prepend('<img src="`r url`" style=\"float: right;width: 200px;\"/>')
+   });
+</script>
+
+<style>
+body {
+text-align: justify}
+</style>
+
+<style type="text/css">
+  body{
+  font-size: 12pt;
+}
+</style>
+
+<style type="text/css">
+.main-container {
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{r Packages setup, include = FALSE}
+
+Packages <- c( "readxl","haven","ggplot2","dplyr","MASS","summarytools","car","lme4","lmerTest","nlme","multcomp","emmeans","ggeffects","ggiraphExtra","sjPlot","sjmisc","qwraps2","extrafont","openxlsx","igraph","gimme","purrr","ggthemes","plotly","dataxray","knitr","gmodels","tidyverse","infer","skimr","pander", "RColorBrewer","expss","lmerTest","ggpubr","table1","DescTools","forplo","pROC","ROCit","rms", "nnet", "VIM", "lsr","irr","blandr")
+
+lapply(Packages, library, character.only = T)
+
+pvalue <- function(x, ...) {
+    y <- unlist(x)
+    g <- factor(rep(1:length(x), times=sapply(x, length)))
+    if (is.numeric(y)) {
+        p <- t.test(y ~ g)$p.value
+    } else {
+        p <- fisher.test(table(y, g))$p.value
+    }
+    c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+pvalue2 <- function(x, ...) {
+    y <- unlist(x)
+    g <- factor(rep(1:length(x), times=sapply(x, length)))
+    if (is.numeric(y)) {
+        p <- wilcox.test(y ~ g)$p.value
+    } else {
+        p <- fisher.test(table(y, g))$p.value
+    }
+    c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+```
+
+```{r Data import and preparation, include = FALSE}
+
+#Import MasterFile
+Master <- read_excel("2024_06_27_MasterFile_Analysis.xlsx")
+# Remove exclusion
+Master <- Master %>%
+  filter( HEALTHY_OR_ASTHMA == 1 & EXCLUDE == 0 & REDCAP_SEQ_NO != 75  )
+
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO, redcap_event_name) %>%
+  mutate(  Severe_asthma_attacks_past_12m = ifelse( is.na(Exacerbations_OCS)==T,NA,sum(Exacerbations_OCS,Exacerbations_OCs_plus_ABs,na.rm=T )),
+           GINA_Step_cat = ifelse( GINA_Step <=3, 1,GINA_Step   ),
+           hads_anx_total_cat8 = ifelse( hads_anx_total >= 8, 1, 0),
+           hads_dep_total_cat8 = ifelse( hads_dep_total >= 8, 1, 0),
+           pvcdi_total_cat4 = ifelse( pvcdi_total >= 4, 1, 0), 
+           nij_total_cat23 = ifelse( nij_total >= 23, 1, 0) )
+
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate( V2_V1_R5R19_Diff_Camb = ifelse(  n() == 1, NA, last(na.omit(Pre_R5R19)) - first(Pre_R5R19) ),
+          V2_V1_AX_Diff_Camb = ifelse(  n() == 1, NA, last(na.omit(Pre_AX)) - first(Pre_AX) ),
+          V2_ACQ5 = ifelse(  n() == 1, NA, last(na.omit(acq5_moy)) ),  
+          V2_Antibio = ifelse(  n() == 1, NA, last(na.omit(V2_Antibiotic_treament)) ),
+          V1_Pre_PEF_L = first(Pre_PEF_L),
+          V2_Pre_PEF_L = ifelse(  n() == 1, NA, last(na.omit(Pre_PEF_L)) ),
+          V3_delais = ifelse(  n() == 1, NA, last(na.omit(DELAY)) ),
+          V3_OCS = ifelse(  n() == 1, NA, last(na.omit(v90_cso)) ),
+          V3_Antibio = ifelse(  n() == 1, NA, last(na.omit(v90_antibio)) ),
+          V3_Treat = ifelse(  n() == 1, NA, last(na.omit(v90_modif_rx)) ),
+          V3_Biologic= ifelse(  n() == 1, NA, last(na.omit(info_v3_bio_presc)) ),
+          V3_Biologic_type = ifelse(  n() == 1, NA, last(na.omit(info_v3_bio_name)) ),
+          V3_ACQ5 = ifelse(  n() == 1, NA, last(na.omit(v90_acq5_moy)) ),
+          V2_AE_ACNEA_GR = ifelse(  n() == 1, NA, last(na.omit(AE_ACNEA_GR)) ), 
+          V2_AE_APPETITE_GR = ifelse(  n() == 1, NA, last(na.omit(AE_APPETITE_GR)) ),
+          V2_AE_HEADACHE_GR = ifelse(  n() == 1, NA, last(na.omit(AE_HEADACHE_GR)) ),
+          V2_AE_DYSPEPSIA_GR = ifelse(  n() == 1, NA, last(na.omit(AE_DYSPEPSIA_GR)) ),
+          V2_AE_HYPERGLY_GR = ifelse(  n() == 1, NA, last(na.omit(AE_HYPERGLY_GR)) ),
+          V2_AE_HTA_GR = ifelse(  n() == 1, NA, last(na.omit(AE_HTA_GR)) ),
+          V2_AE_INSOMNIA_GR = ifelse(  n() == 1, NA, last(na.omit(AE_INSOMNIA_GR)) ),
+          V2_AE_SHAKE_GR = ifelse(  n() == 1, NA, last(na.omit(AE_SHAKE_GR)) ),
+          V2_AE_MOOD_GR = ifelse(  n() == 1, NA, last(na.omit(AE_MOOD_GR)) ),
+          V2_AE_BLURRY_GR = ifelse(  n() == 1, NA, last(na.omit(AE_BLURRY_GR)) ),
+          V2_AE_OTHER_GR = ifelse(  n() == 1, NA, last(na.omit(AE_OTHER_GR)) ),
+          V2_AE_OTHER_WHAT = ifelse(  n() == 1, NA, last(na.omit(AE_OTHER_WHAT)) ),
+          V2_OLOEOS_Type = ifelse(  n() == 1, NA, last(na.omit(V2_OLOEOS_Type)) ),
+          V2_OLOEOS_Abso = ifelse(  n() == 1, NA, last(na.omit(OLOEOS_Abso)) ),
+          V2_OLOEOS_PORC = ifelse(  n() == 1, NA, last(na.omit(OLOEOS_PORC)) ),
+          V2_BloodEOS_Abso = ifelse(  n() == 1, NA, last(na.omit(BloodEOS_Abso)) )
+          )
+
+
+```
+
+```{r recoding, include = FALSE}
+
+val_lab(Master$HEALTHY_OR_ASTHMA) <- make_labels("
+             1  Asthma   
+             2  Healthy      ")
+
+Master$HEALTHY_OR_ASTHMA <- as.factor(Master$HEALTHY_OR_ASTHMA)
+
+val_lab(Master$Sex) <- make_labels("
+             1  Female   
+             2  Male      ")
+
+Master$Sex <- as.factor(Master$Sex)
+
+val_lab(Master$Tobacco) <- make_labels("
+             1  Smoker   
+             2  Non-smoker
+             3  Ex-smoker
+             4  Passive smoker   ")
+
+Master$Tobacco <- as.factor(Master$Tobacco)
+
+val_lab(Master$GINA_Step_cat) <- make_labels("
+             1  1-3   
+             4  4 
+             5  5  ")
+
+Master$GINA_Step_cat <- as.factor(Master$GINA_Step_cat)
+
+val_lab(Master$On_MART) <- make_labels("
+             0 No
+             1 Yes  ")
+
+Master$On_MART <- as.factor(Master$On_MART)
+
+val_lab(Master$On_any_ICS_LABA) <- make_labels("
+             0 No
+             1 Yes  ")
+
+Master$On_any_ICS_LABA <- as.factor(Master$On_any_ICS_LABA)
+
+val_lab(Master$On_any_LAMA) <- make_labels("
+             0 No
+             1 Yes  ")
+
+Master$On_any_LAMA <- as.factor(Master$On_any_LAMA)
+
+val_lab(Master$On_any_LTRA) <- make_labels("
+             0 No
+             1 Yes  ")
+
+Master$On_any_LTRA <- as.factor(Master$On_any_LTRA)
+
+#val_lab(Master$Rhinitis) <- make_labels("
+#             0 No
+#             1 Yes  ")
+
+Master$Rhinitis <- as.factor(Master$Rhinitis)
+
+#val_lab(Master$Eczema) <- make_labels("
+#             0 No
+#             1 Yes  ")
+
+Master$Eczema <- as.factor(Master$Eczema)
+
+#val_lab(Master$Food_allergy) <- make_labels("
+#             0 No
+#             1 Yes  ")
+
+Master$Food_allergy <- as.factor(Master$Food_allergy)
+
+#val_lab(Master$Chronic_sinusitis) <- make_labels("
+#             0 No
+#             1 Yes  ")
+
+Master$Chronic_sinusitis <- as.factor(Master$Chronic_sinusitis)
+
+#val_lab(Master$Nasal_Polyps) <- make_labels("
+#             0 No
+#             1 Yes  ")
+
+Master$Nasal_Polyps <- as.factor(Master$Nasal_Polyps)
+
+val_lab(Master$Obstructive_sleep_apnea) <- make_labels("
+             0 No
+             1 Yes  ")
+
+Master$Obstructive_sleep_apnea <- as.factor(Master$Obstructive_sleep_apnea)
+
+val_lab(Master$hads_anx_total_cat8) <- make_labels("
+             0 Less than 8
+             1 8 and more  ")
+
+Master$hads_anx_total_cat8 <- as.factor(Master$hads_anx_total_cat8)
+
+val_lab(Master$hads_dep_total_cat8) <- make_labels("
+             0 Less than 8
+             1 8 and more  ")
+
+Master$hads_dep_total_cat8 <- as.factor(Master$hads_dep_total_cat8)
+
+val_lab(Master$pvcdi_total_cat4) <- make_labels("
+             0 Less than 4
+             1 4 and more  ")
+
+Master$pvcdi_total_cat4 <- as.factor(Master$pvcdi_total_cat4)
+
+val_lab(Master$nij_total_cat23) <- make_labels("
+             0 Less than 23
+             1 23 and more  ")
+
+Master$nij_total_cat23 <- as.factor(Master$nij_total_cat23)
+
+val_lab(Master$Any_IgE_Resp_Allergens) <- make_labels("
+             0 No
+             1 Yes  ")
+
+Master$Any_IgE_Resp_Allergens <- as.factor(Master$Any_IgE_Resp_Allergens)
+
+val_lab(Master$SpEos_High) <- make_labels("
+             0 Low
+             1 High  ")
+
+Master$SpEos_High <- as.factor(Master$SpEos_High)
+
+val_lab(Master$SpMissing) <- make_labels("
+             0 Not missing
+             1 Missing  ")
+
+Master$SpMissing <- as.factor(Master$SpMissing)
+
+val_lab(Master$Fev1Down) <- make_labels("
+             0 Less than -10%
+             1 -10% and more  ")
+
+Master$Fev1Down <- as.factor(Master$Fev1Down)
+
+val_lab(Master$T2_high_low) <- make_labels("
+             0 Low
+             1 High  ")
+
+Master$T2_high_low <- as.factor(Master$T2_high_low)
+
+val_lab(Master$Previously_T2high) <- make_labels("
+             0 No
+             1 Yes  ")
+
+Master$Previously_T2high <- as.factor(Master$Previously_T2high)
+
+val_lab(Master$T2_hothot_med_lowlow) <- make_labels("
+             0 Lowlow
+             1 Med
+             2 Hothot   ")
+
+Master$T2_hothot_med_lowlow <- as.factor(Master$T2_hothot_med_lowlow)
+
+val_lab(Master$V1_MULTI_Pos) <- make_labels("
+             0 No
+             1 Yes  ")
+
+Master$V1_MULTI_Pos <- as.factor(Master$V1_MULTI_Pos)
+
+val_lab(Master$V1_MULTI_Pos_Rhino) <- make_labels("
+             0 No
+             1 Yes  ")
+
+Master$V1_MULTI_Pos_Rhino <- as.factor(Master$V1_MULTI_Pos_Rhino)
+
+
+Master.patient <- Master[!duplicated(Master$REDCAP_SEQ_NO),]
+
+
+Master.patient <- Master.patient %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate( V2_V1_Pre_FEV1_PORC_change_cat10 = ifelse(V2_V1_Pre_FEV1_PORC_change < 10,0,1),  
+          V2_V1_Pre_FEV1_PORC_change_ord = ifelse(V2_V1_Pre_FEV1_PORC_change < 10,0,  
+                                                  ifelse(V2_V1_Pre_FEV1_PORC_change >= 10 & V2_V1_Pre_FEV1_PORC_change < 20 ,1,   
+                                                         ifelse(V2_V1_Pre_FEV1_PORC_change >= 20 & V2_V1_Pre_FEV1_PORC_change < 30 ,2,3))),
+          V2_V1_Pre_FEV1_L_cat0.1  = ifelse(V2_V1_Pre_FEV1_L < 0.1,0,1),
+          V2_V1_Pre_FEV1_L_cat0.2 = ifelse(V2_V1_Pre_FEV1_L < 0.2,0,1),
+          V2_V1_Pre_FEV1_L_ord = ifelse(V2_V1_Pre_FEV1_L < 0.1,0,  
+                                        ifelse(V2_V1_Pre_FEV1_L >= 0.1 & V2_V1_Pre_FEV1_L < 0.2 ,1,  
+                                               ifelse(V2_V1_Pre_FEV1_L >= 0.2 & V2_V1_Pre_FEV1_L < 0.3 ,2,3 ))),
+          V2_V1_Post_FEV1_PORC_change_cat10 = ifelse(V2_V1_Post_FEV1_PORC_change < 10,0,1),  
+          V2_V1_Post_FEV1_PORC_change_ord = ifelse(V2_V1_Post_FEV1_PORC_change < 10,0,  
+                                                  ifelse(V2_V1_Post_FEV1_PORC_change >= 10 & V2_V1_Post_FEV1_PORC_change < 20 ,1,   
+                                                         ifelse(V2_V1_Post_FEV1_PORC_change >= 20 & V2_V1_Post_FEV1_PORC_change < 30 ,2,3))),
+          V2_V1_Post_FEV1_L_cat0.1  = ifelse(V2_V1_Post_FEV1_L < 0.1,0,1),
+          V2_V1_Post_FEV1_L_cat0.2 = ifelse(V2_V1_Post_FEV1_L < 0.2,0,1),
+          V2_V1_Post_FEV1_L_ord = ifelse(V2_V1_Post_FEV1_L < 0.1,0,  
+                                        ifelse(V2_V1_Post_FEV1_L >= 0.1 & V2_V1_Post_FEV1_L < 0.2 ,1,  
+                                               ifelse(V2_V1_Post_FEV1_L >= 0.2 & V2_V1_Post_FEV1_L < 0.3 ,2,3 ))),
+          V2_V1_ACQ_cat0_5 = ifelse( V2_V1_ACQ5 < -0.5,0,1)   , 
+          V2_V1_ACQ_ord = ifelse( V2_V1_ACQ5 < -1.5,0, 
+                                   ifelse( V2_V1_ACQ5 >= -1.5 & V2_V1_ACQ5 < -1,1 , 
+                                           ifelse( V2_V1_ACQ5 >= -1 & V2_V1_ACQ5 < -0.5,2,3 )))   ,
+          V2_ACQ_cat1_5 =  ifelse( V2_ACQ5 < 1.5,1,0)  ,
+          V2_ACQ_cat0_75 = ifelse( V2_ACQ5 < 0.75,1,0) ,
+          V2_V1_mRC_cat1 = ifelse( V2_V1_mRC > -1,0,1),
+          V2_V1_VAS_cat17 = ifelse( V2_V1_VAS > -17,0,1),
+          V2_V1_R5R19_Diff_Camb_0.06 = ifelse( V2_V1_R5R19_Diff_Camb > -0.06,0,1),
+          V2_V1_AX_Diff_Camb_0.65 = ifelse( V2_V1_AX_Diff_Camb > -0.65,0,1),
+          V3_V1_ACQ_cat0_5 = ifelse( V3_V1_ACQ5 < -0.5,0,1),
+          V3_ACQ_cat1_5 =  ifelse( V3_ACQ5 < 1.5,1,0)  ,
+          V3_ACQ_cat0_75 =  ifelse( V3_ACQ5 < 0.75,1,0)  ,
+          BloodEOS_Abso_log10 = log10(BloodEOS_Abso),
+          V2_BloodEOS_Abso_log10 = log10(V2_BloodEOS_Abso),
+          OLOEOS_Abso_log10 = log10(OLOEOS_Abso),
+          V2_OLOEOS_Abso_log10 = log10(V2_OLOEOS_Abso),
+          FeNO_log10 = log10(FeNO),
+          SpuEOS_PCT_log10 = log10(SpuEOS_PCT+0.25),
+          Spu_TCC_log10 = log10(Spu_TCC), 
+          V1_IgE_log10  = log10(V1_IgE),
+          Pre_FEV1_PORC_rescale = (Pre_FEV1_PORC*-0.1),
+          Attack_vs_Pre_FEV1_relative_12m_rescale = (Attack_vs_Pre_FEV1_relative_12m*-0.1),
+          acq5_moy_rescale = (acq5_moy*2),
+          Adherence_PORC_ICS_presc_renewed_per_year_rescale = (Adherence_PORC_ICS_presc_renewed_per_year*-0.1),
+          FEV1_Revers_ml_rescale = (FEV1_Revers_ml*-0.1),
+          T2_hothot_med_lowlow_num = as.numeric(T2_hothot_med_lowlow)
+          )
+
+
+val_lab(Master.patient$V2_V1_Pre_FEV1_PORC_change_cat10) <- make_labels("
+             0 Less than 10
+             1 10 and more  ")
+
+Master.patient$V2_V1_Pre_FEV1_PORC_change_cat10 <- as.factor(Master.patient$V2_V1_Pre_FEV1_PORC_change_cat10)
+
+val_lab(Master.patient$V2_V1_Pre_FEV1_PORC_change_ord) <- make_labels("
+             0 Less than 10
+             1 10-20
+             2 20-30
+             3 30 and more ")
+
+Master.patient$V2_V1_Pre_FEV1_PORC_change_ord <- as.factor(Master.patient$V2_V1_Pre_FEV1_PORC_change_ord)
+
+val_lab(Master.patient$V2_V1_Pre_FEV1_L_cat0.1) <- make_labels("
+             0 Less than 0.1
+             1 0.1 and more  ")
+
+Master.patient$V2_V1_Pre_FEV1_L_cat0.1 <- as.factor(Master.patient$V2_V1_Pre_FEV1_L_cat0.1)
+
+val_lab(Master.patient$V2_V1_Pre_FEV1_L_cat0.2) <- make_labels("
+             0 Less than 0.2
+             1 0.2 and more  ")
+
+Master.patient$V2_V1_Pre_FEV1_L_cat0.2 <- as.factor(Master.patient$V2_V1_Pre_FEV1_L_cat0.2)
+
+val_lab(Master.patient$V2_V1_Pre_FEV1_L_ord) <- make_labels("
+             0 Less than 0.1
+             1 0.1-0.2
+             2 0.2-0.3
+             3 0.3 and more ")
+
+Master.patient$V2_V1_Pre_FEV1_L_ord <- as.factor(Master.patient$V2_V1_Pre_FEV1_L_ord)
+
+val_lab(Master.patient$V2_V1_Post_FEV1_PORC_change_cat10) <- make_labels("
+             0 Less than 10
+             1 10 and more  ")
+
+Master.patient$V2_V1_Post_FEV1_PORC_change_cat10 <- as.factor(Master.patient$V2_V1_Post_FEV1_PORC_change_cat10)
+
+val_lab(Master.patient$V2_V1_Post_FEV1_PORC_change_ord) <- make_labels("
+             0 Less than 10
+             1 10-20
+             2 20-30
+             3 30 and more ")
+
+Master.patient$V2_V1_Post_FEV1_PORC_change_ord <- as.factor(Master.patient$V2_V1_Post_FEV1_PORC_change_ord)
+
+val_lab(Master.patient$V2_V1_Post_FEV1_L_cat0.1) <- make_labels("
+             0 Less than 0.1
+             1 0.1 and more  ")
+
+Master.patient$V2_V1_Post_FEV1_L_cat0.1 <- as.factor(Master.patient$V2_V1_Post_FEV1_L_cat0.1)
+
+val_lab(Master.patient$V2_V1_Post_FEV1_L_cat0.2) <- make_labels("
+             0 Less than 0.2
+             1 0.2 and more  ")
+
+Master.patient$V2_V1_Post_FEV1_L_cat0.2 <- as.factor(Master.patient$V2_V1_Post_FEV1_L_cat0.2)
+
+val_lab(Master.patient$V2_V1_Post_FEV1_L_ord) <- make_labels("
+             0 Less than 0.1
+             1 0.1-0.2
+             2 0.2-0.3
+             3 0.3 and more ")
+
+Master.patient$V2_V1_Post_FEV1_L_ord <- as.factor(Master.patient$V2_V1_Post_FEV1_L_ord)
+
+val_lab(Master.patient$V2_V1_ACQ_cat0_5) <- make_labels("
+             0 Less than -0.5
+             1 -0.5 and more  ")
+
+Master.patient$V2_V1_ACQ_cat0_5 <- as.factor(Master.patient$V2_V1_ACQ_cat0_5)
+
+val_lab(Master.patient$V3_V1_ACQ_cat0_5) <- make_labels("
+             0 Less than -0.5
+             1 -0.5 and more  ")
+
+Master.patient$V3_V1_ACQ_cat0_5 <- as.factor(Master.patient$V3_V1_ACQ_cat0_5)
+
+val_lab(Master.patient$V2_V1_ACQ_ord) <- make_labels("
+             0 Less than -1.5
+             1 -1.5 - -1.0
+             2 -1.0 - -0.5
+             3 -0.5 and more ")
+
+Master.patient$V2_V1_ACQ_ord <- as.factor(Master.patient$V2_V1_ACQ_ord)
+
+val_lab(Master.patient$V2_ACQ_cat1_5) <- make_labels("
+             0 1.5 and more
+             1 Less than 1.5  ")
+
+Master.patient$V2_ACQ_cat1_5 <- as.factor(Master.patient$V2_ACQ_cat1_5)
+
+val_lab(Master.patient$V3_ACQ_cat1_5) <- make_labels("
+             0 1.5 and more
+             1 Less than 1.5  ")
+
+Master.patient$V3_ACQ_cat1_5 <- as.factor(Master.patient$V3_ACQ_cat1_5)
+
+val_lab(Master.patient$V2_ACQ_cat0_75) <- make_labels("
+             0 0.75 and more
+             1 Less than 0.75  ")
+
+Master.patient$V2_ACQ_cat0_75 <- as.factor(Master.patient$V2_ACQ_cat0_75)
+
+val_lab(Master.patient$V2_V1_mRC_cat1) <- make_labels("
+             0 -1 and more
+             1 Less than -1  ")
+
+Master.patient$V2_V1_mRC_cat1 <- as.factor(Master.patient$V2_V1_mRC_cat1)
+
+val_lab(Master.patient$V2_V1_VAS_cat17) <- make_labels("
+             0 -17 and more
+             1 Less than -17  ")
+
+Master.patient$V2_V1_VAS_cat17 <- as.factor(Master.patient$V2_V1_VAS_cat17)
+
+val_lab(Master.patient$V2_V1_R5R19_Diff_Camb_0.06) <- make_labels("
+             0 -0.06 and more
+             1 Less than -0.06  ")
+
+Master.patient$V2_V1_R5R19_Diff_Camb_0.06 <- as.factor(Master.patient$V2_V1_R5R19_Diff_Camb_0.06)
+
+val_lab(Master.patient$V2_V1_AX_Diff_Camb_0.65) <- make_labels("
+             0 -0.65 and more
+             1 Less than -0.65  ")
+
+Master.patient$V2_V1_AX_Diff_Camb_0.65 <- as.factor(Master.patient$V2_V1_AX_Diff_Camb_0.65)
+
+
+Master.v2 <- Master %>%
+  filter( redcap_event_name == "visite_2_arm_1") %>%
+  dplyr::select(c("REDCAP_SEQ_NO","redcap_event_name","T2_high_low","ma_depj1","ma_depj2","ma_depj3","ma_depj4","ma_depj5","ma_depj6","ma_moy_j1","ma_moy_j2","ma_moy_j3","ma_moy_j4","ma_moy_j5","ma_moy_j6"))
+
+Master.v2.long <- reshape(Master.v2, varying=list(c("ma_depj1", "ma_depj2", "ma_depj3","ma_depj4","ma_depj5","ma_depj6"),
+                                   c("ma_moy_j1", "ma_moy_j2", "ma_moy_j3","ma_moy_j4","ma_moy_j5","ma_moy_j6")),
+                 direction="long", timevar="Time", idvar=c("REDCAP_SEQ_NO","T2_high_low"),
+                 v.names=c("ma_depj", "ma_moy"))
+
+Master.patient$V2_AE_ACNEA_GR <- ifelse(is.na(Master.patient$V2_AE_ACNEA_GR)==T,0, Master.patient$V2_AE_ACNEA_GR )
+Master.patient$V2_AE_APPETITE_GR <- ifelse(is.na(Master.patient$V2_AE_APPETITE_GR)==T,0, Master.patient$V2_AE_APPETITE_GR )
+Master.patient$V2_AE_HEADACHE_GR <- ifelse(is.na(Master.patient$V2_AE_HEADACHE_GR)==T,0, Master.patient$V2_AE_HEADACHE_GR )
+Master.patient$V2_AE_DYSPEPSIA_GR <- ifelse(is.na(Master.patient$V2_AE_DYSPEPSIA_GR)==T,0, Master.patient$V2_AE_DYSPEPSIA_GR )
+Master.patient$V2_AE_HYPERGLY_GR <- ifelse(is.na(Master.patient$V2_AE_HYPERGLY_GR)==T,0, Master.patient$V2_AE_HYPERGLY_GR )
+Master.patient$V2_AE_HTA_GR <- ifelse(is.na(Master.patient$V2_AE_HTA_GR)==T,0, Master.patient$V2_AE_HTA_GR )
+Master.patient$V2_AE_INSOMNIA_GR <- ifelse(is.na(Master.patient$V2_AE_INSOMNIA_GR)==T,0, Master.patient$V2_AE_INSOMNIA_GR )
+Master.patient$V2_AE_SHAKE_GR <- ifelse(is.na(Master.patient$V2_AE_SHAKE_GR)==T,0, Master.patient$V2_AE_SHAKE_GR )
+Master.patient$V2_AE_MOOD_GR <- ifelse(is.na(Master.patient$V2_AE_MOOD_GR)==T,0, Master.patient$V2_AE_MOOD_GR )
+Master.patient$V2_AE_BLURRY_GR <- ifelse(is.na(Master.patient$V2_AE_BLURRY_GR)==T,0, Master.patient$V2_AE_BLURRY_GR )
+Master.patient$V2_AE_OTHER_GR <- ifelse(is.na(Master.patient$V2_AE_OTHER_GR)==T,0, Master.patient$V2_AE_OTHER_GR )
+
+Master.patient <- Master.patient %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate( Any_side_effect = ifelse( any(V2_AE_ACNEA_GR>0,V2_AE_APPETITE_GR>0,V2_AE_HEADACHE_GR>0,V2_AE_DYSPEPSIA_GR>0,V2_AE_HYPERGLY_GR>0,V2_AE_HTA_GR>0,V2_AE_INSOMNIA_GR>0,V2_AE_SHAKE_GR>0,V2_AE_MOOD_GR>0,V2_AE_BLURRY_GR>0,V2_AE_OTHER_GR>0) ==T,1,0 ),
+          Any_mild_side_effect = ifelse( any(V2_AE_ACNEA_GR==1 | V2_AE_ACNEA_GR==2 ,V2_AE_APPETITE_GR==1 | V2_AE_APPETITE_GR==2 ,V2_AE_HEADACHE_GR==1 | V2_AE_HEADACHE_GR==2 ,V2_AE_DYSPEPSIA_GR==1 | V2_AE_DYSPEPSIA_GR==2 ,V2_AE_HYPERGLY_GR==1 |V2_AE_HYPERGLY_GR==2 ,V2_AE_HTA_GR==1 | V2_AE_HTA_GR==2 ,V2_AE_INSOMNIA_GR==1 | V2_AE_INSOMNIA_GR==2 ,V2_AE_SHAKE_GR==1 | V2_AE_SHAKE_GR==2 ,V2_AE_MOOD_GR==1 | V2_AE_MOOD_GR==2 ,V2_AE_BLURRY_GR==1 | V2_AE_BLURRY_GR==2 ,V2_AE_OTHER_GR==1  | V2_AE_OTHER_GR==2  ) ==T,1,0 ),
+          Any_severe_side_effect = ifelse( any(V2_AE_ACNEA_GR==3 | V2_AE_ACNEA_GR==4 ,V2_AE_APPETITE_GR==3 | V2_AE_APPETITE_GR==4 ,V2_AE_HEADACHE_GR==3 | V2_AE_HEADACHE_GR==4 ,V2_AE_DYSPEPSIA_GR==3 | V2_AE_DYSPEPSIA_GR==4 ,V2_AE_HYPERGLY_GR==3 |V2_AE_HYPERGLY_GR==4 ,V2_AE_HTA_GR==3 | V2_AE_HTA_GR==4 ,V2_AE_INSOMNIA_GR==3 | V2_AE_INSOMNIA_GR==4 ,V2_AE_SHAKE_GR==3 | V2_AE_SHAKE_GR==4 ,V2_AE_MOOD_GR==3 | V2_AE_MOOD_GR==4 ,V2_AE_BLURRY_GR==3 | V2_AE_BLURRY_GR==4 ,V2_AE_OTHER_GR==3  | V2_AE_OTHER_GR==4  ) ==T,1,0 )
+          )
+
+Master.patient$V2_AE_ACNEA_GR <- as.factor(Master.patient$V2_AE_ACNEA_GR )
+Master.patient$V2_AE_APPETITE_GR <-  as.factor(Master.patient$V2_AE_APPETITE_GR )
+Master.patient$V2_AE_HEADACHE_GR <-  as.factor(Master.patient$V2_AE_HEADACHE_GR )
+Master.patient$V2_AE_DYSPEPSIA_GR <-  as.factor(Master.patient$V2_AE_DYSPEPSIA_GR )
+Master.patient$V2_AE_HYPERGLY_GR <-  as.factor(Master.patient$V2_AE_HYPERGLY_GR )
+Master.patient$V2_AE_HTA_GR <-  as.factor(Master.patient$V2_AE_HTA_GR )
+Master.patient$V2_AE_INSOMNIA_GR <-  as.factor(Master.patient$V2_AE_INSOMNIA_GR )
+Master.patient$V2_AE_SHAKE_GR <-  as.factor(Master.patient$V2_AE_SHAKE_GR )
+Master.patient$V2_AE_MOOD_GR <-  as.factor(Master.patient$V2_AE_MOOD_GR )
+Master.patient$V2_AE_BLURRY_GR <-  as.factor(Master.patient$V2_AE_BLURRY_GR )
+Master.patient$V2_AE_OTHER_GR <-  as.factor(Master.patient$V2_AE_OTHER_GR )
+
+val_lab(Master.patient$Any_side_effect) <- make_labels("
+             0 No
+             1 Yes   ")
+
+Master.patient$Any_side_effect <-  as.factor(Master.patient$Any_side_effect )
+
+val_lab(Master.patient$Any_mild_side_effect) <- make_labels("
+             0 No
+             1 Yes   ")
+
+Master.patient$Any_mild_side_effect <-  as.factor(Master.patient$Any_mild_side_effect )
+
+val_lab(Master.patient$Any_severe_side_effect) <- make_labels("
+             0 No
+             1 Yes   ")
+
+Master.patient$Any_severe_side_effect <-  as.factor(Master.patient$Any_severe_side_effect )
+
+val_lab(Master.patient$OLOEOS_Type ) <- make_labels("
+             1 Capillary 
+             2 Venous    ")
+
+Master.patient$OLOEOS_Type <-  as.factor(Master.patient$OLOEOS_Type )
+
+val_lab(Master.patient$V2_OLOEOS_Type ) <- make_labels("
+             1 Capillary 
+             2 Venous    ")
+
+Master.patient$V2_OLOEOS_Type <-  as.factor(Master.patient$V2_OLOEOS_Type )
+
+val_lab(Master$OLOEOS_Type ) <- make_labels("
+             1 Capillary 
+             2 Venous    ")
+
+Master$OLOEOS_Type <-  as.factor(Master$OLOEOS_Type )
+
+
+Master.patient$Severe_asthma_attacks_past_12m <- ifelse( is.na(Master.patient$Severe_asthma_attacks_past_12m)==T,0,Master.patient$Severe_asthma_attacks_past_12m  )
+
+Master.patient$TOTAL_FP_equivalent_daily_dose <- ifelse( Master.patient$REDCAP_SEQ_NO == 13, 500, ifelse(  Master.patient$REDCAP_SEQ_NO == 21, 100, ifelse(  Master.patient$REDCAP_SEQ_NO == 50, 1000, ifelse(  Master.patient$REDCAP_SEQ_NO == 61, 0,Master.patient$TOTAL_FP_equivalent_daily_dose   )   )   )       )
+
+Master.patient$Rhinitis <- ifelse( Master.patient$REDCAP_SEQ_NO == 17, 3,  Master.patient$Rhinitis)
+
+```
+
+
+# Descriptive statistic {.tabset}
+
+## Overall 
+
+```{r ,echo=FALSE}
+
+label(Master.patient$Age_at_study_enrollment) <- "Age"
+label(Master.patient$Duration_of_asthma) <- "Duration of asthma"
+label(Master.patient$Severe_asthma_attacks_past_12m) <- "Severe asthma attacks (past 12 months)"
+label(Master.patient$acq5_moy) <- "Mean ACQ5"
+label(Master.patient$vas_total) <- "VAS total"
+label(Master.patient$mrc_score) <- "MRC score"
+label(Master.patient$GINA_Step_cat) <- "GINA Step"
+label(Master.patient$On_any_ICS_LABA) <- "On any ICS or LABA"
+label(Master.patient$TOTAL_FP_equivalent_daily_dose) <- "TOTAL FP equivalent daily dose"
+label(Master.patient$On_MART) <- "On MART"
+label(Master.patient$On_any_LAMA) <- "On any LAMA"
+label(Master.patient$On_any_LTRA) <- "On any LTRA"
+label(Master.patient$Food_allergy) <- "Food allergy"
+label(Master.patient$Chronic_sinusitis) <- "Chronic sinusitis"
+label(Master.patient$Nasal_Polyps) <- "Nasal Polyps"
+label(Master.patient$Obstructive_sleep_apnea) <- "Obstructive sleep apnea"
+label(Master.patient$V1_IgE) <- "Total IgE"
+label(Master.patient$charlson_total) <- "Charlson score"
+label(Master.patient$Any_IgE_Resp_Allergens) <- "Any IgE sensitization"
+label(Master.patient$Number_sensitisations) <- "Number of sensitization"
+label(Master.patient$BloodEOS_Abso) <- "BEC"
+label(Master.patient$Previously_T2high) <- "Previously T2 high"
+label(Master.patient$T2_high_low) <- "T2 high"
+label(Master.patient$T2_hothot_med_lowlow) <- "T2 hothot"
+label(Master.patient$SpuEOS_PCT) <- "spEos"
+label(Master.patient$Spu_TCC) <- "Sputum TCC"
+label(Master.patient$SpEos_High) <- "spEos High"
+label(Master.patient$Pre_FEV1_L) <- "Pre FEV1 (L)"
+label(Master.patient$Pre_FEV1_PORC) <- "Pre FEV1 (%)"
+label(Master.patient$FEV1_Revers_ml) <- "Reversibility"
+label(Master.patient$Pre_FEV1_FVC_ratio) <- "Pre FEV1/FVC ratio"
+label(Master.patient$Pre_FEF2575_PORC) <- "Pre FEF2575 (%)"
+label(Master.patient$Attack_vs_Pre_FEV1_L_12m) <- "Delta FEV1"
+label(Master.patient$Attack_vs_Pre_FEV1_relative_12m) <- "Relative delta FEV1 (%)"
+label(Master.patient$Pre_R5) <- "Pre R5"
+label(Master.patient$Pre_R19) <- "Pre R19"
+label(Master.patient$Pre_R5R19) <- "Pre R5R19"
+label(Master.patient$Pre_X5) <- "Pre X5"
+label(Master.patient$Pre_AX) <- "Pre AX"
+label(Master.patient$V1_MULTI_Pos) <- "Viral associated exacerbation"
+label(Master.patient$ea_exp_micro_pos) <- "Bacterial infection on sputum culture"
+
+table1( ~ Age_at_study_enrollment + Sex + BMI + Tobacco + Duration_of_asthma + Severe_asthma_attacks_past_12m + acq5_moy + vas_total + mrc_score + Adherence_PORC_ICS_presc_renewed_per_year + GINA_Step_cat + On_any_ICS_LABA + TOTAL_FP_equivalent_daily_dose + On_MART + On_any_LAMA + On_any_LTRA + Rhinitis + Eczema + Food_allergy + Chronic_sinusitis + Nasal_Polyps + Obstructive_sleep_apnea + hads_anx_total_cat8 + hads_dep_total_cat8 + pvcdi_total_cat4 + nij_total_cat23 + charlson_total + V1_IgE + Any_IgE_Resp_Allergens + Number_sensitisations + FeNO + BloodEOS_Abso + Previously_T2high + T2_high_low + T2_hothot_med_lowlow + BloodNEU_Abso + CRP + Spu_TCC + SpuEOS_PCT + SpEos_High + Spu_Neu_PORC + SpMissing + Pre_FEV1_L + Pre_FEV1_PORC + FEV1_Revers_ml + Pre_FEV1_FVC_ratio + Pre_FEF2575_PORC + Attack_vs_Pre_FEV1_L_12m + Attack_vs_Pre_FEV1_relative_12m + Fev1Down + Pre_R5 + Pre_R19 + Pre_R5R19 + Pre_X5 + Pre_AX + V1_MULTI_Pos + V1_MULTI_Pos_Rhino + ea_exp_micro_pos, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times")
+
+```
+
+## By group
+
+```{r ,echo=FALSE, warning=FALSE}
+
+table1( ~ Age_at_study_enrollment + Sex + BMI + Tobacco + Duration_of_asthma + Severe_asthma_attacks_past_12m + acq5_moy + vas_total + mrc_score + Adherence_PORC_ICS_presc_renewed_per_year + GINA_Step_cat + On_any_ICS_LABA + TOTAL_FP_equivalent_daily_dose + On_MART + On_any_LAMA + On_any_LTRA + Rhinitis + Eczema + Food_allergy + Chronic_sinusitis + Nasal_Polyps + Obstructive_sleep_apnea + hads_anx_total_cat8 + hads_dep_total_cat8 + pvcdi_total_cat4 + nij_total_cat23 + charlson_total + V1_IgE + Any_IgE_Resp_Allergens + Number_sensitisations + FeNO + BloodEOS_Abso + Previously_T2high + BloodNEU_Abso + CRP + Spu_TCC + SpuEOS_PCT + SpEos_High + Spu_Neu_PORC + SpMissing + Pre_FEV1_L + Pre_FEV1_PORC + FEV1_Revers_ml + Pre_FEV1_FVC_ratio + Pre_FEF2575_PORC + Attack_vs_Pre_FEV1_L_12m + Attack_vs_Pre_FEV1_relative_12m + Fev1Down + Pre_R5 + Pre_R19 + Pre_R5R19 + Pre_X5 + Pre_AX + V1_MULTI_Pos + V1_MULTI_Pos_Rhino  + ea_exp_micro_pos | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", overall=F, extra.col=list(`P-value`=pvalue))
+
+```
+
+## By group (Mann-Whitney)
+
+```{r ,echo=FALSE, warning=FALSE}
+
+table1( ~ V1_IgE + Number_sensitisations + FeNO + BloodEOS_Abso + BloodNEU_Abso + CRP + Spu_TCC + SpuEOS_PCT + Spu_Neu_PORC | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", overall=F, extra.col=list(`P-value`=pvalue2))
+
+```
+
+
+# Primary - T2 HIGH {.tabset}
+
+## 1.1 : FEV1 Pre Absolute difference
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_Pre_FEV1_L | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_Pre_FEV1_L ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_Pre_FEV1_L ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 1.2 :	FEV1 Pre Relative Percentage of change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_Pre_FEV1_PORC_change | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_Pre_FEV1_PORC_change ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_Pre_FEV1_PORC_change ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 1.3 : FEV1 Pre MCID ≥100 ml
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V2_V1_Pre_FEV1_L_cat0.1,fisher = T)
+
+```
+
+## 1.4 : FEV1 Pre MCID <100, ≥ 100, 200, 300ml
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V2_V1_Pre_FEV1_L_ord,fisher = T)
+
+MHChisqTest(table(Master.patient$T2_high_low, Master.patient$V2_V1_Pre_FEV1_L_ord))
+
+```
+
+
+# Secondary - T2 HIGH {.tabset}
+
+## 2.1 : ACQ-5 Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_ACQ5 | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_ACQ5 ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_ACQ5 ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 2.2 : ACQ-5 MCID < -0.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V2_V1_ACQ_cat0_5,fisher = T)
+
+```
+
+## 2.3 : ACQ-5 MCID <-0.5, ≥ -0.5 to <-1.0, ≥ -1.0 to <-1.5, ≥-1.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V2_V1_ACQ_ord,fisher = T)
+
+MHChisqTest(table(Master.patient$T2_high_low, Master.patient$V2_V1_ACQ_ord))
+
+```
+
+## 2.4 : ACQ-5 V2 controlled <1.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V2_ACQ_cat1_5,fisher = T)
+
+```
+
+
+# Exploratory - T2 HIGH {.tabset}
+
+## 3.1 : MRC Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_mRC | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_mRC ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_mRC ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 3.2 : MRC MCID ≥1 
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V2_V1_mRC_cat1,fisher = T)
+
+```
+
+## 4.1 : VAS Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_VAS | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_VAS ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_VAS ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 4.2 : VAS MCID ≥17
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V2_V1_VAS_cat17,fisher = T)
+
+```
+
+## 5.1 : FEF25-75 Percentage of change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_pre_FEF2575_POR_change | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_pre_FEF2575_POR_change ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_pre_FEF2575_POR_change ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 6.1 : R5-R19 Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_R5R19_Diff_Camb | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_R5R19_Diff_Camb ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_R5R19_Diff_Camb ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 6.2 : R5-R19 MCID reduction ≥0.06 
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V2_V1_R5R19_Diff_Camb_0.06,fisher = T)
+
+```
+
+## 7.1 : AX Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_AX_Diff_Camb | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_AX_Diff_Camb ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_AX_Diff_Camb ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 7.2 : AX MCID reduction ≥0.65
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V2_V1_AX_Diff_Camb_0.65,fisher = T)
+
+```
+
+## 8.1 : Pre PEF L
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_Pre_PEF_L | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_Pre_PEF_L ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_Pre_PEF_L ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 8.2 : Pre PEF PORC
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_Pre_PEF_PORC | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_Pre_PEF_PORC ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_Pre_PEF_PORC ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 8.3 : Pre PEF PORC Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_pre_PEF_PORC_change | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V2_V1_pre_PEF_PORC_change ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V2_V1_pre_PEF_PORC_change ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 9.1 :  ACQ-5 Absolute Change V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V3_V1_ACQ5 | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("Mean difference and 95% C.I. :")
+
+MeanDiffCI(V3_V1_ACQ5 ~ T2_high_low, data = Master.patient, na.rm=T)
+
+print("P-value :")
+
+t.test(V3_V1_ACQ5 ~ T2_high_low, data = Master.patient, var.equal = T)
+
+```
+
+## 9.2 : ACQ-5 V3 MCID < -0.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V3_V1_ACQ_cat0_5,fisher = T)
+
+```
+
+## 9.3 : ACQ-5 V3 controlled <1.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V3_ACQ_cat1_5,fisher = T)
+
+```
+
+## 9.4 : ACQ-5 V3 controlled <0.75
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V3_ACQ_cat0_75,fisher = T)
+
+```
+
+## 10 : Use of OCS V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V3_OCS,fisher = T)
+
+```
+
+## 11 : Use of antibiotics V3 
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V3_Antibio,fisher = T)
+
+```
+
+## 12 : Treatment modification V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V3_Treat,fisher = T)
+
+```
+
+## 13 : Biologic after V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V3_Biologic,fisher = T)
+
+```
+
+## 14 : Biologic type after V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+CrossTable(Master.patient$T2_high_low,Master.patient$V3_Biologic_type,fisher = T)
+
+```
+
+
+# Primary - HOTHOT {.tabset}
+
+## 1.1 : FEV1 Pre Absolute difference
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_Pre_FEV1_L | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_Pre_FEV1_L, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_Pre_FEV1_L ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 1.2 :	FEV1 Pre Relative Percentage of change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_Pre_FEV1_PORC_change | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_Pre_FEV1_PORC_change, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_Pre_FEV1_PORC_change ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 1.3 : FEV1 Pre MCID ≥100 ml
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V2_V1_Pre_FEV1_L_cat0.1))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V2_V1_Pre_FEV1_L_cat0.1,fisher = T)
+
+```
+
+## 1.4 : FEV1 Pre MCID <100, ≥ 100, 200, 300ml
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V2_V1_Pre_FEV1_L_ord))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V2_V1_Pre_FEV1_L_ord,fisher = T)
+
+```
+
+
+# Secondary - HOTHOT {.tabset}
+
+## 2.1 : ACQ-5 Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_ACQ5 | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_ACQ5, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_ACQ5 ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 2.2 : ACQ-5 MCID < -0.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V2_V1_ACQ_cat0_5))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V2_V1_ACQ_cat0_5,fisher = T)
+
+```
+
+## 2.3 : ACQ-5 MCID <-0.5, ≥ -0.5 to <-1.0, ≥ -1.0 to <-1.5, ≥-1.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V2_V1_ACQ_ord))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V2_V1_ACQ_ord,fisher = T)
+
+```
+
+## 2.4 : ACQ-5 V2 controlled <1.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V2_ACQ_cat1_5))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V2_ACQ_cat1_5,fisher = T)
+
+```
+
+
+# Exploratory - HOTHOT {.tabset}
+
+## 3.1 : MRC Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_mRC | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_mRC, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_mRC ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 3.2 : MRC MCID ≥1 
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V2_V1_mRC_cat1))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V2_V1_mRC_cat1,fisher = T)
+
+```
+
+## 4.1 : VAS Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_VAS | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_VAS, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_VAS ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 4.2 : VAS MCID ≥17
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V2_V1_VAS_cat17))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V2_V1_VAS_cat17,fisher = T)
+
+```
+
+## 5.1 : FEF25-75 Percentage of change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_pre_FEF2575_POR_change | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_pre_FEF2575_POR_change, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_pre_FEF2575_POR_change ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 6.1 : R5-R19 Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_R5R19_Diff_Camb | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_R5R19_Diff_Camb, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_R5R19_Diff_Camb ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 6.2 : R5-R19 MCID reduction ≥0.06 
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V2_V1_R5R19_Diff_Camb_0.06))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V2_V1_R5R19_Diff_Camb_0.06,fisher = T)
+
+```
+
+## 7.1 : AX Absolute Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_AX_Diff_Camb | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_AX_Diff_Camb, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_AX_Diff_Camb ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 7.2 : AX MCID reduction ≥0.65
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V2_V1_AX_Diff_Camb_0.65))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V2_V1_AX_Diff_Camb_0.65,fisher = T)
+
+```
+
+## 8.1 : Pre PEF L
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_Pre_PEF_L | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_Pre_PEF_L, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_Pre_PEF_L ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 8.2 : Pre PEF PORC
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_Pre_PEF_PORC | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_Pre_PEF_PORC, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_Pre_PEF_PORC ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 8.3 : Pre PEF PORC Change
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V2_V1_pre_PEF_PORC_change | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V2_V1_pre_PEF_PORC_change, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V2_V1_pre_PEF_PORC_change ~ T2_hothot_med_lowlow, data = Master.patient))
+
+```
+
+## 9.1 :  ACQ-5 Absolute Change V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("Descriptive statistic :")
+
+table1( ~ V3_V1_ACQ5 | T2_hothot_med_lowlow, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", render.missing = NULL, overall=F)
+
+print("P-value trend :")
+
+JonckheereTerpstraTest(Master.patient$V3_V1_ACQ5, Master.patient$T2_hothot_med_lowlow)
+
+print("P-value ANOVA :")
+
+summary(aov(V3_V1_ACQ5 ~ T2_hothot_med_lowlow, data = Master.patient))
+
+
+```
+
+## 9.2 : ACQ-5 V3 MCID < -0.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V3_V1_ACQ_cat0_5))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V3_V1_ACQ_cat0_5,fisher = T)
+
+```
+
+## 9.3 : ACQ-5 V3 controlled <1.5
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V3_ACQ_cat1_5))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V3_ACQ_cat1_5,fisher = T)
+
+```
+
+## 9.4 : ACQ-5 V3 controlled <0.75
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V3_ACQ_cat0_75))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V3_ACQ_cat0_75,fisher = T)
+
+```
+
+## 10 : Use of OCS V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V3_OCS))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V3_OCS,fisher = T)
+
+```
+
+## 11 : Use of antibiotics V3 
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V3_Antibio))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V3_Antibio,fisher = T)
+
+```
+
+## 12 : Treatment modification V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V3_Treat))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V3_Treat,fisher = T)
+
+```
+
+## 13 : Biologic after V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V3_Biologic))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V3_Biologic,fisher = T)
+
+```
+
+## 14 : Biologic type after V3
+
+```{r ,echo=FALSE, warning=FALSE}
+
+print("P-value trend :")
+
+MHChisqTest(table(Master.patient$T2_hothot_med_lowlow, Master.patient$V3_Biologic_type))
+
+print("Chi-squared :")
+
+CrossTable(Master.patient$T2_hothot_med_lowlow,Master.patient$V3_Biologic_type,fisher = T)
+
+```
+
+
+# Regression model {.tabset}
+
+## Difference in FEV1 preBD (L)  {.tabset}
+
+### Univariable
+
+```{r ,include=FALSE}
+
+mat <- as.data.frame(matrix( nrow = 100, ncol = 5)) # Empty matrix
+
+mat <- mat %>%
+  rename(Predictor = V1,
+         Model.estimate = V2,
+         CI.Lower.Bound = V3,
+         CI.Upper.Bound = V4, 
+         P.value = V5)       # Rename column
+
+Index <- 1 # Index value for loop position
+
+for (i in c("BloodEOS_Abso_log10","FeNO_log10","SpuEOS_PCT_log10","Spu_TCC_log10","T2_high_low","Previously_T2high","V1_IgE_log10","Pre_FEV1_PORC_rescale","Pre_FEV1_FVC_ratio","Attack_vs_Pre_FEV1_relative_12m_rescale","FEV1_Revers_ml_rescale","Age_at_study_enrollment","Sex","BMI","Tobacco","acq5_moy_rescale","Severe_asthma_attacks_past_12m","On_MART","Adherence_PORC_ICS_presc_renewed_per_year_rescale","Any_IgE_Resp_Allergens","Nasal_Polyps","charlson_total","V1_MULTI_Pos","V2_Antibio","ea_exp_micro_pos") ){
+  
+u <- as.data.frame(Master.patient[,i])
+
+              tryCatch( expr = {
+              fit <- lm( V2_V1_Pre_FEV1_L ~ unlist(u), data= Master.patient ) 
+
+              p1 <- round(Confint(fit)[2,1],1) 
+              p2 <- round(Confint(fit)[2,2],5) # Lower bound
+              p3 <- round(Confint(fit)[2,3],5) # Upper bound
+              p4 <- round(summary(fit)$coefficient[-1,4],4) # P-value  
+              names <- colnames(Master.patient[i])
+              mat[Index,] <- if(is_empty(p1)==T) c(names,NA,NA,NA,NA) else c(names,p1,p2,p3,p4)
+  
+              }, error=function(e) { mat[Index,] <<- c(colnames(Master.patient[i]),NA,NA,NA,NA)  }  )
+
+          Index <- Index + 1  
+                           
+                }
+
+fit <- lm( V2_V1_Pre_FEV1_L ~ GINA_Step_cat, data= Master.patient ) 
+summary(fit)
+mat[26,] <-  c("Gina Step - 4",round(Confint(fit)[2,1],1),round(Confint(fit)[2,2],1),round(Confint(fit)[2,3],5),round(summary(fit)$coefficient[2,4],4))
+mat[27,] <-  c("Gina Step - 5",round(Confint(fit)[3,1],1),round(Confint(fit)[3,2],1),round(Confint(fit)[3,3],5),round(summary(fit)$coefficient[3,4],4))
+
+fit <- lm( V2_V1_Pre_FEV1_L ~ BloodEOS_Abso_log10*FeNO_log10, data= Master.patient ) 
+summary(fit)
+mat[28,] <-  c("Interaction",round(Confint(fit)[4,1],1),round(Confint(fit)[4,2],1),round(Confint(fit)[4,3],5),round(summary(fit)$coefficient[4,4],4))
+
+mat$Model.estimate <- as.numeric(mat$Model.estimate)
+mat$CI.Lower.Bound <- as.numeric(mat$CI.Lower.Bound)
+mat$CI.Upper.Bound <- as.numeric(mat$CI.Upper.Bound)
+mat$P.value <- as.numeric(mat$P.value)
+
+mat <- na.omit(mat)
+
+mat <- mat[c(1,2,28,3:27),]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE, fig.height=8, fig.width=10}
+
+forplo(mat[,2:4]  , row.labels = c("Log10 BEC","Log10 FeNO","Log10 BEC : Log10 FeNO interaction*","Log10 spEos","Log10 Sputum TCC","T2 High","Previously T2 high","Log10 total IgE ","FEV1% (per 10% decrease)","FEV1/FVC","Delta FEV1% (per 10% decrease)","Reversibility (per 10% decrease)","Age","Sex - Male","BMI","Smoking status - Ex-smoker","ACQ-5 (per 0.5 increase)","Severe asthma attacks (past 12 months)","MART","Adherence (per 10% decrease)","Any IgE sensitization","Nasal polyps","Charlson Comorbidity Index score","Viral associated exacerbation","Antibiotic prescribed","Bacterial infection on sputum culture","GINA step 4 (vs steps 1-3)","GINA step 5 (vs steps 1-3)"),add.columns= as.data.frame(cbind(rep(NA,28),format(round(mat$P.value,3),nsmall = 3 ))),
+       add.colnames=c('',"P-value"),
+       scaledot.by=mat$Model.estimate,
+       title = "Univariable predictors",
+       left.align=TRUE,
+       margin.right = 12,
+       margin.left = 18,
+       em = "MD",
+       linreg = T)
+
+pdf("Forest_uni_FEV1L.pdf",         # File name
+    width = 10, height = 8, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk",    # Color model (cmyk is required for most publications)
+    paper = "a4r")          # Paper size
+
+forplo( round(mat[,2:4],3) , row.labels = c("Log10 BEC","Log10 FeNO","Log10 BEC : Log10 FeNO interaction*","Log10 spEos","Log10 Sputum TCC","T2 High","Previously T2 high","Log10 total IgE ","FEV1% (per 10% decrease)","FEV1/FVC","Delta FEV1% (per 10% decrease)","Reversibility (per 10% decrease)","Age","Sex - Male","BMI","Smoking status - Ex-smoker","ACQ-5 (per 0.5 increase)","Severe asthma attacks (past 12 months)","MART","Adherence (per 10% decrease)","Any IgE sensitization","Nasal polyps","Charlson Comorbidity Index score","Viral associated exacerbation","Antibiotic prescribed","Bacterial infection on sputum culture","GINA step 4 (vs steps 1-3)","GINA step 5 (vs steps 1-3)"),add.columns= as.data.frame(cbind(rep(NA,28),format(round(mat$P.value,3),nsmall = 3 ))),
+       add.colnames=c('',"P-value"),
+       scaledot.by=mat$Model.estimate,
+       title = "Univariable predictors",
+       left.align=TRUE,
+       margin.right = 12,
+       margin.left = 18,
+       em = "MD",
+       linreg = T)
+
+dev.off() 
+
+```
+
+### Multivariable only interaction
+
+```{r ,echo=FALSE, warning=FALSE}
+
+Mod <- lm( V2_V1_Pre_FEV1_L ~ BloodEOS_Abso_log10*FeNO_log10 , data= Master.patient )
+
+print("Mean differences and 95% C.I. :")
+
+Confint(Mod)
+
+print("P-value :")
+
+summary(Mod)$coefficient[-1,4]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=8}
+
+forplo(Mod, 
+       row.labels=c('Log10 BEC','Log10 FeNO','Interaction'),
+       margin.right = 10,
+       margin.left = 8,
+       title = "Multivariable predictors",
+       em = "MD",
+       linreg = T,
+       left.align=TRUE) 
+
+```
+
+### Multivariable complete
+
+```{r ,echo=FALSE, warning=FALSE}
+
+Mod <- lm( V2_V1_Pre_FEV1_L ~ BloodEOS_Abso_log10*FeNO_log10 + Pre_FEV1_PORC_rescale + Attack_vs_Pre_FEV1_relative_12m_rescale + Any_IgE_Resp_Allergens, data= Master.patient )
+
+car::vif(Mod)
+
+print("Summary :")
+
+summary(Mod)
+
+print("Mean differences and 95% C.I. :")
+
+Confint(Mod)
+
+print("P-value :")
+
+summary(Mod)$coefficient[-1,4]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+forplo(Mod, 
+       row.labels=c('Log10 BEC','Log10 FeNO','Interaction','FEV1% (per 10% decrease)','Delta FEV1% (per 10% decrease)','Any IgE sensitization'),
+       margin.right = 10,
+       margin.left = 16,
+       title = "Multivariable predictors",
+       em = "MD",
+       linreg = T,
+       left.align=TRUE) 
+
+```
+
+### Multivariable categorical
+
+```{r ,echo=FALSE, warning=FALSE}
+
+Mod <- lm( V2_V1_Pre_FEV1_L ~ T2_hothot_med_lowlow_num + Pre_FEV1_PORC_rescale + Attack_vs_Pre_FEV1_relative_12m_rescale + Any_IgE_Resp_Allergens, data= Master.patient )
+
+car::vif(Mod)
+
+print("Summary :")
+
+summary(Mod)
+
+print("Mean differences and 95% C.I. :")
+
+Confint(Mod)
+
+print("P-value :")
+
+summary(Mod)$coefficient[-1,4]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+forplo(Mod, 
+       row.labels=c('T2 - HOTHOT ordinal','FEV1% (per 10% decrease)','Delta FEV1% (per 10% decrease)','Any IgE sensitization'),
+       margin.right = 10,
+       margin.left = 16,
+       title = "Multivariable predictors",
+       em = "MD",
+       linreg = T,
+       left.align=TRUE) 
+
+
+
+pdf("Forest_Multi_cat.pdf",         # File name
+    width = 10, height = 6, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk",    # Color model (cmyk is required for most publications)
+    paper = "a4r")          # Paper size
+
+
+forplo(Mod, 
+       row.labels=c('T2 - HOTHOT ordinal','FEV1% (per 10% decrease)','Delta FEV1% (per 10% decrease)','Any IgE sensitization'),
+       margin.right = 10,
+       margin.left = 16,
+       title = "Multivariable predictors",
+       em = "MD",
+       linreg = T,
+       left.align=TRUE) 
+
+
+dev.off()
+
+
+```
+
+### Spline curve - Multivariable only interaction
+
+```{r,echo = F}
+
+Master.patient$FeNO_cat <- ifelse( Master.patient$FeNO < 25, 1 , ifelse( Master.patient$FeNO >=25 & Master.patient$FeNO < 35,2,3   ))
+
+Master.patient$FeNO_cat <- as.factor(Master.patient$FeNO_cat)
+
+Master.patient$FeNO_cat_v2 <- ifelse( Master.patient$FeNO < 25, 1 , 2)
+
+Master.patient$FeNO_cat_v2 <- as.factor(Master.patient$FeNO_cat_v2)
+
+Master.patient$FeNO_cat_v3 <- ifelse( Master.patient$FeNO < 35, 1 , 2)
+
+Master.patient$FeNO_cat_v3 <- as.factor(Master.patient$FeNO_cat_v3)
+
+model1 <- lm(V2_V1_Pre_FEV1_L ~ BloodEOS_Abso*FeNO_cat, data = Master.patient)
+
+model2 <- lm(V2_V1_Pre_FEV1_L ~ BloodEOS_Abso*FeNO_cat_v2, data = Master.patient)
+
+model3 <- lm(V2_V1_Pre_FEV1_L ~ BloodEOS_Abso*FeNO_cat_v3, data = Master.patient)
+
+```
+
+
+```{r,echo = F, warning=FALSE,fig.height=6, fig.width=12}
+
+ggplot(data = Master.patient, aes(x = BloodEOS_Abso, y = predict(model2, type="response"),color = FeNO_cat_v2, linetype = FeNO_cat_v2)) +
+  geom_smooth(alpha = 0.3,
+    formula = y ~ s(x, k=1, bs="cs"),
+    color= "black", # kleur van de lijn
+    stat = "smooth",
+    method = "gam",
+    se = TRUE, level = 0.99) +
+  xlab("\nBaseline BEC (x10^9 cells/L)") +
+  ylab("Difference in FEV1 preBD (L)\n") +
+  scale_color_manual(values = c("black","black"),
+                    labels = c("<25","≥25"))+
+  scale_linetype_manual(values = c(2,1),
+                    labels = c("<25","≥25")) +
+  labs(color = "FeNO groups",linetype = "FeNO groups") +
+  scale_x_continuous(trans="log",limits=c(0.1,1.2),breaks=c(0.1,0.15,0.3,0.6,1,1.2))+
+  scale_y_continuous(breaks = c(0,0.1,0.2,0.3,0.4,0.5,0.6))+
+  theme_sjplot2() +
+  theme(axis.text.x = element_text( size = 10),
+        axis.text.y = element_text(face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 16),
+        plot.title = element_text(face = "bold", size = 20),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  labs(title = "Spline curve Baseline BEC per FeNO group")
+
+
+
+pdf("SPLINE_Multi.pdf",         # File name
+    width = 12, height = 6, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk",    # Color model (cmyk is required for most publications)
+    paper = "a4r")          # Paper size
+
+
+ggplot(data = Master.patient, aes(x = BloodEOS_Abso, y = predict(model2, type="response"),color = FeNO_cat_v2, linetype = FeNO_cat_v2)) +
+ geom_smooth(alpha = 0.3,
+    formula = y ~ s(x, k=1, bs="cs"),
+    color= "black", 
+    stat = "smooth",
+    method = "gam",
+    se = TRUE, level = 0.99) +
+  xlab("\nBaseline BEC (x10^9 cells/L)") +
+  ylab("Difference in FEV1 preBD (L)\n") +
+  scale_color_manual(values = c("black","black"),
+                    labels = c("<25",expression("">="25")))+
+  scale_linetype_manual(values = c(2,1),
+                    labels = c("<25",expression("">="25"))) +
+  labs(color = "FeNO groups",linetype = "FeNO groups") +
+  scale_x_continuous(trans="log",limits=c(0.1,1.2),breaks=c(0.1,0.15,0.3,0.6,1,1.2))+
+  scale_y_continuous(breaks = c(0,0.1,0.2,0.3,0.4,0.5,0.6))+
+  theme_sjplot2() +
+  theme(axis.text.x = element_text( size = 10),
+        axis.text.y = element_text(face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 16),
+        plot.title = element_text(face = "bold", size = 20),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+ labs(title = "Spline curve Baseline BEC per FeNO group")
+
+
+dev.off()
+
+
+```
+
+
+### Spline curve - Multivariable complete with interaction
+
+```{r,echo = F}
+
+model1 <- lm(V2_V1_Pre_FEV1_L ~ BloodEOS_Abso*FeNO_cat + Pre_FEV1_PORC_rescale  + Any_IgE_Resp_Allergens, data = Master.patient)
+
+model2 <- lm(V2_V1_Pre_FEV1_L ~ BloodEOS_Abso*FeNO_cat_v2 + Pre_FEV1_PORC_rescale  + Any_IgE_Resp_Allergens, data = Master.patient)
+
+model3 <- lm(V2_V1_Pre_FEV1_L ~ BloodEOS_Abso*FeNO_cat_v3 + Pre_FEV1_PORC_rescale  + Any_IgE_Resp_Allergens, data = Master.patient)
+
+```
+
+```{r,echo = F, warning=FALSE,fig.height=6, fig.width=12}
+
+ggplot(data = Master.patient, aes(x = BloodEOS_Abso, y = predict(model2, type="response"),color = FeNO_cat_v2, linetype = FeNO_cat_v2)) +
+  geom_smooth(alpha = 0.3,
+    formula = y ~ s(x, k=4, bs="cs"),
+    color= "black", # kleur van de lijn
+    stat = "smooth",
+    method = "gam",
+    se = TRUE, level = 0.95) +
+  xlab("\nBaseline BEC (x10^9 cells/L)") +
+  ylab("Difference in FEV1 preBD (L)\n") +
+  scale_color_manual(values = c("black","black"),
+                    labels = c("<25","≥25"))+
+  scale_linetype_manual(values = c(2,1),
+                    labels = c("<25","≥25")) +
+  labs(color = "FeNO groups",linetype = "FeNO groups") +
+  scale_x_continuous(trans="log",limits=c(0.1,1.2),breaks=c(0.1,0.15,0.3,0.6,1,1.2))+
+  scale_y_continuous(breaks = c(-0.2,-0.1,0,0.1,0.2,0.3,0.4,0.5,0.6,0.7))+
+  theme_sjplot2() +
+  theme(axis.text.x = element_text( size = 10),
+        axis.text.y = element_text(face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 16),
+        plot.title = element_text(face = "bold", size = 20),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  labs(title = "Spline curve Baseline BEC per FeNO group")
+
+```
+
+
+## FEV1 Pre MCID ≥100 ml {.tabset}
+
+### Univariable
+
+```{r ,include = FALSE}
+
+Master.patient$V2_V1_Pre_FEV1_L_cat0.1 <- as.numeric(Master.patient$V2_V1_Pre_FEV1_L_cat0.1 ) -1
+
+mat <- as.data.frame(matrix( nrow = 100, ncol = 5)) # Empty matrix
+
+mat <- mat %>%
+  rename(Predictor = V1,
+         Model.estimate = V2,
+         CI.Lower.Bound = V3,
+         CI.Upper.Bound = V4, 
+         P.value = V5)       # Rename column
+
+Index <- 1 # Index value for loop position
+
+for (i in c("BloodEOS_Abso_log10","FeNO_log10","SpuEOS_PCT_log10","Spu_TCC_log10","T2_high_low","Previously_T2high","V1_IgE_log10","Pre_FEV1_PORC_rescale","Pre_FEV1_FVC_ratio","Attack_vs_Pre_FEV1_relative_12m_rescale","FEV1_Revers_ml_rescale","Age_at_study_enrollment","Sex","BMI","Tobacco","acq5_moy_rescale","Severe_asthma_attacks_past_12m","On_MART","Adherence_PORC_ICS_presc_renewed_per_year_rescale","Any_IgE_Resp_Allergens","Nasal_Polyps","charlson_total","V1_MULTI_Pos","V2_Antibio","ea_exp_micro_pos") ){
+  
+u <- as.data.frame(Master.patient[,i])
+
+              tryCatch( expr = {
+              fit <- glm( V2_V1_Pre_FEV1_L_cat0.1 ~ unlist(u), family = binomial(link="logit"), data= Master.patient ) 
+
+              p1 <- round(exp(Confint(fit)[2,1]),1) 
+              p2 <- round(exp(Confint(fit)[2,2]),5) # Lower bound
+              p3 <- round(exp(Confint(fit)[2,3]),5) # Upper bound
+              p4 <- round(summary(fit)$coefficient[-1,4],4) # P-value  
+              names <- colnames(Master.patient[i])
+              mat[Index,] <- if(is_empty(p1)==T) c(names,NA,NA,NA,NA) else c(names,p1,p2,p3,p4)
+  
+              }, error=function(e) { mat[Index,] <<- c(colnames(Master.patient[i]),NA,NA,NA,NA)  }  )
+
+          Index <- Index + 1  
+                           
+                }
+
+fit <- glm( V2_V1_Pre_FEV1_L_cat0.1 ~ GINA_Step_cat, family = binomial(link="logit"), data= Master.patient ) 
+mat[26,] <-  c("Gina Step - 4",round(exp(Confint(fit)[2,1]),1),round(exp(Confint(fit)[2,2]),1),round(exp(Confint(fit)[2,3]),5),round(summary(fit)$coefficient[2,4],4))
+mat[27,] <-  c("Gina Step - 5",round(exp(Confint(fit)[3,1]),1),round(exp(Confint(fit)[3,2]),1),round(exp(Confint(fit)[3,3]),5),round(summary(fit)$coefficient[3,4],4))
+
+fit <- glm( V2_V1_Pre_FEV1_L_cat0.1 ~ BloodEOS_Abso_log10*FeNO_log10, family = binomial(link="logit"), data= Master.patient ) 
+summary(fit)
+mat[28,] <-  c("Interaction",round(exp(Confint(fit)[4,1]),1),round(exp(Confint(fit)[4,2]),1),round(exp(Confint(fit)[4,3]),5),round(summary(fit)$coefficient[4,4],4))
+
+mat$Model.estimate <- as.numeric(mat$Model.estimate)
+mat$CI.Lower.Bound <- as.numeric(mat$CI.Lower.Bound)
+mat$CI.Upper.Bound <- as.numeric(mat$CI.Upper.Bound)
+mat$P.value <- as.numeric(mat$P.value)
+
+mat <- na.omit(mat)
+
+mat <- mat[c(1,2,28,3:27),]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE, fig.height=8, fig.width=10}
+
+forplo(mat[,2:4]  , row.labels = c("Log10 BEC","Log10 FeNO","Log10 BEC : Log10 FeNO interaction*","Log10 spEos","Log10 Sputum TCC","T2 High","Previously T2 high","Log10 total IgE ","FEV1% (per 10% decrease)","FEV1/FVC","Delta FEV1% (per 10% decrease)","Reversibility (per 10% decrease)","Age","Sex - Male","BMI","Smoking status - Ex-smoker","ACQ-5 (per 0.5 increase)","Severe asthma attacks (past 12 months)","MART","Adherence (per 10% decrease)","Any IgE sensitization","Nasal polyps","Charlson Comorbidity Index score","Viral associated exacerbation","Antibiotic prescribed","Bacterial infection on sputum culture","GINA step 4 (vs steps 1-3)","GINA step 5 (vs steps 1-3)"),add.columns= as.data.frame(cbind(rep(NA,28),format(round(mat$P.value,3),nsmall = 3 ))),
+       add.colnames=c('',"P-value"),
+       scaledot.by=mat$Model.estimate,
+       title = "Univariable predictors",
+       left.align=TRUE,
+       margin.right = 12,
+       margin.left = 18,
+       em = "OR",
+       linreg = F, 
+       xlim = c(0.2,20))
+
+```
+
+
+### Multivariable only interaction
+
+```{r ,echo=FALSE, warning=FALSE}
+
+Mod <- glm( V2_V1_Pre_FEV1_L_cat0.1 ~ BloodEOS_Abso_log10*FeNO_log10, family = binomial(link = "logit") , data= Master.patient )
+
+print("Odds ratio and 95% C.I. :")
+
+exp(Confint(Mod))
+
+print("P-value :")
+
+summary(Mod)$coefficient[-1,4]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=8}
+
+forplo(Mod, 
+       row.labels=c('Log10 BEC','Log10 FeNO','Interaction'),
+       margin.right = 10,
+       margin.left = 8,
+       title = "Multivariable predictors",
+       em = "OR",
+       linreg = F,
+       left.align=TRUE) 
+
+```
+
+### Multivariable complete
+
+```{r ,echo=FALSE, warning=FALSE}
+
+Mod <- glm( V2_V1_Pre_FEV1_L_cat0.1 ~ BloodEOS_Abso_log10*FeNO_log10 + Pre_FEV1_PORC_rescale + Attack_vs_Pre_FEV1_relative_12m_rescale + Any_IgE_Resp_Allergens, family = binomial(link = "logit"), data= Master.patient )
+
+car::vif(Mod)
+
+print("Summary :")
+
+summary(Mod)
+
+print("Odds ratio and 95% C.I. :")
+
+exp(Confint(Mod))
+
+print("P-value :")
+
+summary(Mod)$coefficient[-1,4]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+forplo(Mod, 
+       row.labels=c('Log10 BEC','Log10 FeNO','Interaction','FEV1% (per 10% decrease)','Delta FEV1% (per 10% decrease)','Any IgE sensitization'),
+       margin.right = 10,
+       margin.left = 16,
+       title = "Multivariable predictors",
+       em = "OR",
+       linreg = F,
+       left.align=TRUE) 
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+Data.test <- Master.patient %>%
+  drop_na(Attack_vs_Pre_FEV1_relative_12m_rescale)
+
+roc.cur.2 <- roc( Data.test$V2_V1_Pre_FEV1_L_cat0.1, unlist(fitted(Mod)), percent=TRUE,
+                  ci=T, boot.n=100, ci.alpha=0.95, stratified=FALSE,
+                  plot=T, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                  print.auc=TRUE, show.thres=TRUE, best.method = "youden")
+
+```
+
+### Multivariable categorical
+
+```{r ,echo=FALSE, warning=FALSE}
+
+Mod <- glm( V2_V1_Pre_FEV1_L_cat0.1 ~ T2_hothot_med_lowlow_num + Pre_FEV1_PORC_rescale + Attack_vs_Pre_FEV1_relative_12m_rescale + Any_IgE_Resp_Allergens, family = binomial(link = "logit") ,data= Master.patient )
+
+car::vif(Mod)
+
+print("Summary :")
+
+summary(Mod)
+
+print("Odds ratio and 95% C.I. :")
+
+exp(Confint(Mod))
+
+print("P-value :")
+
+summary(Mod)$coefficient[-1,4]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+forplo(Mod, 
+       row.labels=c('T2 - HOTHOT ordinal','FEV1% (per 10% decrease)','Delta FEV1% (per 10% decrease)','Any IgE sensitization'),
+       margin.right = 10,
+       margin.left = 16,
+       title = "Multivariable predictors",
+       em = "OR",
+       linreg = F,
+       left.align=TRUE) 
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+Data.test <- Master.patient %>%
+  drop_na(Attack_vs_Pre_FEV1_relative_12m_rescale)
+
+roc.cur.2 <- roc( Data.test$V2_V1_Pre_FEV1_L_cat0.1, unlist(fitted(Mod)), percent=TRUE,
+                  ci=T, boot.n=100, ci.alpha=0.95, stratified=FALSE,
+                  plot=T, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                  print.auc=TRUE, show.thres=TRUE, best.method = "youden")
+
+pdf("ROC_Multi_cat.pdf",         # File name
+    width = 10, height = 6, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk",    # Color model (cmyk is required for most publications)
+    paper = "a4r")          # Paper size
+
+roc.cur.2 <- roc( Data.test$V2_V1_Pre_FEV1_L_cat0.1, unlist(fitted(Mod)), percent=TRUE,
+                  ci=T, boot.n=100, ci.alpha=0.95, stratified=FALSE,
+                  plot=T, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                  print.auc=TRUE, show.thres=TRUE, best.method = "youden")
+
+dev.off()
+
+```
+
+
+# Trajectory analysis {.tabset}
+
+## DEP
+
+```{r ,echo=FALSE, warning=FALSE}
+
+Mod <- lmer( ma_depj ~ Time*T2_high_low + (1 | REDCAP_SEQ_NO), data= Master.v2.long )
+
+print("Odds ratio and 95% C.I. :")
+
+Confint(Mod)
+
+print("P-value :")
+
+summary(Mod)$coefficient[-1,5]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+df <- ggpredict(Mod, terms = c("Time","T2_high_low"))
+
+Mod <- lm( Pre_PEF_L ~ T2_high_low, data= Master.patient )
+
+df2 <- ggpredict(Mod, terms = c("T2_high_low"))
+
+df2$group <- c("Low2","High2")
+
+df2$x <- 0
+
+Mod <- lm( V2_Pre_PEF_L ~ T2_high_low, data= Master.patient )
+
+df3 <- ggpredict(Mod, terms = c("T2_high_low"))
+
+df3$group <- c("Low2","High2")
+
+df3$x <- 7
+
+df.full <- rbind(df,df2,df3)
+
+df.full$shape <- c(1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2)
+df.full$shape <- as.factor(df.full$shape)
+
+
+ggplot(data = df.full) + 
+    geom_point(aes(x = x, y = predicted,color=group,shape = shape),position = position_dodge(width = 0.3), size = 2)+
+    geom_line(data = subset(df.full,df.full$x >0 & df.full$x <7 ),aes(x = x, y = predicted,color = group),position = position_dodge(width = 0.3))+
+    theme_sjplot2()+
+    labs(x ="\n Timepoint (day)", y = "PEF (L per min)  \n", color = "", title = "", shape = "")+
+    geom_errorbar( aes(x = x, y = predicted, ymin = conf.low, ymax = conf.high, color = group), width = 0.1,
+  position = position_dodge(width = 0.3))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  scale_color_manual(values = c("Low" = "#577590", "High" = "#BA6E1E","Low2"="#2E765E","High2"="#E2808A"), labels = c("Low","High","Low","High"))+
+  theme(text = element_text(size=16)) +
+  scale_x_continuous(breaks = c(0,1,2,3,4,5,6,7),labels = c("0","1","2","3","4","5","6","7")) +   
+  scale_shape_manual(values=c(15,17), labels = c("On home device","On spirometry"))+
+  guides(color = guide_legend(override.aes = list(alpha = c(1, 1, 1, 1))))
+
+
+```
+
+## ACQ
+
+```{r ,echo=FALSE, warning=FALSE}
+
+Mod <- lmer( ma_moy ~ Time*T2_high_low + (1 | REDCAP_SEQ_NO), data= Master.v2.long )
+
+print("Odds ratio and 95% C.I. :")
+
+Confint(Mod)
+
+print("P-value :")
+
+summary(Mod)$coefficient[-1,5]
+
+```
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+df <- ggpredict(Mod, terms = c("Time","T2_high_low"))
+
+Mod <- lm( acq5_moy ~ T2_high_low, data= Master.patient )
+
+df2 <- ggpredict(Mod, terms = c("T2_high_low"))
+
+df2$group <- c("Low2","High2")
+
+df2$x <- 0
+
+Mod <- lm( V2_ACQ5 ~ T2_high_low, data= Master.patient )
+
+df3 <- ggpredict(Mod, terms = c("T2_high_low"))
+
+df3$group <- c("Low2","High2")
+
+df3$x <- 7
+
+df.full <- rbind(df,df2,df3)
+
+df.full$shape <- c(1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2)
+df.full$shape <- as.factor(df.full$shape)
+
+
+ggplot(data = df.full) + 
+    geom_point(aes(x = x, y = predicted,color=group,shape = shape),position = position_dodge(width = 0.3), size = 2)+
+    geom_line(data = subset(df.full,df.full$x >0 & df.full$x <7 ),aes(x = x, y = predicted,color = group),position = position_dodge(width = 0.3))+
+    theme_sjplot2()+
+    labs(x ="\n Timepoint (day)", y = "Asthma control questionnaire or diary (mean) \n", color = "", title = "", shape = "")+
+    geom_errorbar( aes(x = x, y = predicted, ymin = conf.low, ymax = conf.high, color = group), width = 0.1,
+  position = position_dodge(width = 0.3))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  scale_color_manual(values = c("Low" = "#577590", "High" = "#BA6E1E","Low2"="#2E765E","High2"="#E2808A"), labels = c("Low","High","Low","High"))+
+  theme(text = element_text(size=16)) +
+  scale_x_continuous(breaks = c(0,1,2,3,4,5,6,7),labels = c("0","1","2","3","4","5","6","7")) +   
+  scale_shape_manual(values=c(15,17), labels = c("Diary at home","Questionnaire\nat study visits"))+
+  guides(color = guide_legend(override.aes = list(alpha = c(1, 1, 1, 1))))
+
+
+```
+
+
+# Supplementary analyzes {.tabset}
+
+## T2 low : MART and Previously T2 high 
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+print("Only T2 Low :")
+
+with(Master.patient[Master.patient$T2_high_low == "Low", ], CrossTable(Previously_T2high, On_MART, fisher = T))
+
+print("Only T2 High :")
+
+with(Master.patient[Master.patient$T2_high_low == "High", ], CrossTable(Previously_T2high, On_MART, fisher = T))
+
+
+```
+
+
+# Adverse events grade {.tabset}
+
+## Descriptive
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+table1( ~ V2_AE_ACNEA_GR + V2_AE_APPETITE_GR + V2_AE_HEADACHE_GR + V2_AE_DYSPEPSIA_GR + V2_AE_HYPERGLY_GR + V2_AE_HTA_GR +  V2_AE_INSOMNIA_GR + V2_AE_SHAKE_GR + V2_AE_MOOD_GR + V2_AE_BLURRY_GR + V2_AE_OTHER_GR + Any_side_effect + Any_mild_side_effect + Any_severe_side_effect  | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times")
+
+```
+
+## Comparison by group
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+table1( ~  Any_side_effect + Any_mild_side_effect + Any_severe_side_effect | T2_high_low, data=Master.patient,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", overall=F, extra.col=list(`P-value`=pvalue))
+
+```
+
+
+
+# OLOEOS {.tabset}
+
+## Descriptive
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+table1( ~ OLOEOS_Abso + OLOEOS_PORC + OLOEOS_Type + OLOEOS_repnum  | T2_high_low, data=Master,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times")
+
+```
+
+## Comparison by group
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+table1( ~  OLOEOS_Abso + OLOEOS_PORC + OLOEOS_Type + OLOEOS_repnum  | T2_high_low, data=Master,
+       render.continuous=c(.="Mean (SD)", .="Median [Q1 - Q3]"), topclass="Rtable1-grid Rtable1-shade Rtable1-times", overall=F, extra.col=list(`P-value`=pvalue))
+
+```
+
+## Agreement {.tabset}
+
+```{r ,echo=FALSE, warning=FALSE,fig.height=6,fig.width=10}
+
+icc(
+  Master[,c("BloodEOS_Abso","OLOEOS_Abso")], model = "twoway", 
+  type = "agreement", unit = "single"
+  )
+
+print("Bias and 95% C.I. :")
+
+blandr.statistics(Master$BloodEOS_Abso , Master$OLOEOS_Abso, sig.level = 0.95, LoA.mode = 1)$bias
+blandr.statistics(Master$BloodEOS_Abso , Master$OLOEOS_Abso, sig.level = 0.95, LoA.mode = 1)$biasLowerCI
+blandr.statistics(Master$BloodEOS_Abso , Master$OLOEOS_Abso, sig.level = 0.95, LoA.mode = 1)$biasUpperCI
+
+blandr.draw( Master$BloodEOS_Abso , Master$OLOEOS_Abso )+
+  labs(x = "\n Average of measures", y = "Differences, POC BEC vs Lab BEC \n", title = "") +
+  theme_sjplot2()+
+  theme(text = element_text(size=15))
+
+print("Bias and 95% C.I. :")
+
+blandr.statistics(log10(Master$BloodEOS_Abso+0.01)  , log10(Master$OLOEOS_Abso), sig.level = 0.95, LoA.mode = 1)$bias
+blandr.statistics(log10(Master$BloodEOS_Abso+0.01)  , log10(Master$OLOEOS_Abso), sig.level = 0.95, LoA.mode = 1)$biasLowerCI
+blandr.statistics(log10(Master$BloodEOS_Abso+0.01)  , log10(Master$OLOEOS_Abso), sig.level = 0.95, LoA.mode = 1)$biasUpperCI
+
+blandr.draw( log10(Master$BloodEOS_Abso+0.01)  , log10(Master$OLOEOS_Abso) )+
+  labs(x = "\n Log average", y = "Log difference, POC BEC vs LAB BEC \n", title = "") +
+  theme_sjplot2()+
+  theme(text = element_text(size=15))
+
+
+
+pdf("Bland-Altman.pdf",         # File name
+    width = 10, height = 6, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk",    # Color model (cmyk is required for most publications)
+    paper = "a4r")          # Paper size
+
+
+blandr.draw( Master$BloodEOS_Abso , Master$OLOEOS_Abso )+
+  labs(x = "\n Average of measures", y = "Differences, POC BEC vs Lab BEC \n", title = "") +
+  theme_sjplot2()+
+  theme(text = element_text(size=15))
+
+
+dev.off()
+
+```

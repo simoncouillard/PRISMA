@@ -1,0 +1,638 @@
+---
+title: "Data preparation : Carlos Celis-Preciado <br><br>"
+subtitle:
+  "Project : PRISMA <br>"
+author: "Reference number : 0819 <br><br> Par : Samuel Lemaire-Paquette, statistician"
+date: " Last updated : `r Sys.Date()`<br><br>"
+output: 
+  html_document:
+    theme : united
+    df_print: paged
+    toc: true
+    number_sections: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+# Define variable containing url
+url <- "https://www.crchus.ca/clients/SanteEstrie/Sous-sites/Centres_de_recherche/CRCHUS/Medias-publications/signature_CR-CHUS_rvb-s2.jpg"
+```
+
+<script>
+   $(document).ready(function() {
+     $head = $('#header');
+     $head.prepend('<img src="`r url`" style=\"float: right;width: 200px;\"/>')
+   });
+</script>
+
+<style>
+body {
+text-align: justify}
+</style>
+
+<style type="text/css">
+  body{
+  font-size: 12pt;
+}
+</style>
+
+<style type="text/css">
+.main-container {
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{r Packages setup, include = FALSE}
+
+Packages <- c( "readxl","haven","ggplot2","dplyr","MASS","summarytools","car","lme4","lmerTest","nlme","multcomp","emmeans","ggeffects","ggiraphExtra","sjPlot","sjmisc","qwraps2","extrafont","openxlsx","igraph","gimme","purrr","ggthemes","plotly","dataxray","knitr","gmodels","tidyverse","infer","skimr","pander", "RColorBrewer","expss","lmerTest","ggpubr")
+
+lapply(Packages, library, character.only = T)
+
+```
+
+```{r Data import and preparation, include = FALSE}
+
+#Import REDCAP data
+Data <- read_excel("2024_06_27_DataREDCAP.xlsx")
+
+#New variable for master file
+
+Data$ID <- ifelse( is.na(Data$part_idprisma) == F, Data$part_idprisma, ifelse( is.na(Data$part_idprismav2) == F,Data$part_idprismav2, Data$part_idprismav3 ) )
+
+Data$On_any_ICS_only <- ifelse(  Data$med_inh_37 == 1 | Data$med_inh_3 == 1 | Data$med_inh_5 == 1 | Data$med_inh_6 == 1 | Data$med_inh_16 == 1 | Data$med_inh_17 == 1 | Data$med_inh_23 == 1 | Data$med_inh_24 == 1,1,0 )
+
+Data <- Data %>%
+  group_by(part_id,redcap_event_name) %>%
+  mutate( ICS_ONLY_FP_equivalent_daily_dose = ifelse( is.na(med_inh_defp3) == T & is.na(med_inh_defp5) == T & is.na(med_inh_defp6) == T & is.na(med_inh_defp23) == T & is.na(med_inh_defp24) == T , NA,          sum( med_inh_defp3,med_inh_defp5,med_inh_defp6, med_inh_defp23,med_inh_defp24, na.rm=T )   )   )
+
+Data$ON_any_ICS_LABA_only <- ifelse( Data$med_inh_1 == 1 | Data$med_inh_2 == 1 | Data$med_inh_7 == 1 | Data$med_inh_10 == 1 | Data$med_inh_29 == 1 | Data$med_inh_35 == 1 | Data$med_inh_38 == 1 ,1,0 )
+
+Data <- Data %>%
+  group_by(part_id,redcap_event_name) %>%
+  mutate( ICS_LABA_only_FP_equivalent_daily_dose = ifelse( is.na(med_inh_defp7) == T & is.na(med_inh_defp10) == T & is.na(med_inh_defp29) == T & is.na(med_inh_defp35) == T , NA,          sum( med_inh_defp7,med_inh_defp10,med_inh_defp29, med_inh_defp35, na.rm=T )   )   )
+
+Data$ON_any_ICS_LABA_LAMA_only <- ifelse( Data$med_inh_11 == 1 | Data$med_inh_15 == 1 | Data$med_inh_30 == 1 ,1,0 )
+
+Data <- Data %>%
+  group_by(part_id,redcap_event_name) %>%
+  mutate( ICS_LABA_LAMA_only_FP_equivalent_daily_dose = ifelse( is.na(med_inh_defp11) == T & is.na(med_inh_defp15) == T & is.na(med_inh_defp30) == T  , NA,    sum( med_inh_defp11,med_inh_defp10,med_inh_defp15, med_inh_defp30, na.rm=T )   ),
+          TOTAL_FP_equivalent_daily_dose = ifelse(  is.na(ICS_ONLY_FP_equivalent_daily_dose) == T & is.na(ICS_LABA_only_FP_equivalent_daily_dose) == T & is.na(ICS_LABA_LAMA_only_FP_equivalent_daily_dose) == T   , NA,   sum( ICS_ONLY_FP_equivalent_daily_dose,ICS_LABA_only_FP_equivalent_daily_dose ,ICS_LABA_LAMA_only_FP_equivalent_daily_dose, na.rm = T    ) )    )
+
+Data$On_any_ICS_LABA <- ifelse( Data$ON_any_ICS_LABA_only == 1 |  Data$ON_any_ICS_LABA_LAMA_only == 1,1,0        )
+
+Data$On_any_LAMA <- ifelse( Data$med_inh_19 == 1 | Data$med_inh_25 == 1 | Data$med_inh_27 == 1 | Data$med_inh_28 == 1 | Data$med_inh_31 == 1 ,1,0 )
+
+Data$On_any_SABA <- ifelse( Data$med_inh_36 == 1 | Data$med_inh_12 == 1 | Data$med_inh_33 == 1 | Data$med_inh_34 == 1,1,0 )
+
+Data$On_MART <- ifelse( Data$med_inh_mart_29 == 1 | Data$med_inh_mart_35 == 1,1,0 )
+
+Data$On_any_nasal_ICS <- ifelse( Data$med_all___3 == 1 | Data$med_all___4 == 1 | Data$med_all___5 == 1 | Data$med_all___8 == 1 | Data$med_all___9 == 1 | Data$med_all___10 == 1 | Data$med_all___11 == 1 ,1,0 )
+
+Data$Any_IgE_Resp_Allergens <- apply(Data[,c("all_ani_sang___1", "all_ani_sang___2",  "all_ani_sang___3",  "all_ani_sang___4",  "all_ani_sang___5",  "all_ani_sang___6", 
+"all_ani_sang___7",  "all_ani_sang___8",  "all_ani_sang___9",  "all_arb_sang___1",  "all_arb_sang___2",  "all_arb_sang___3", 
+"all_arb_sang___4",  "all_arb_sang___5",  "all_arb_sang___6",  "all_arb_sang___7",  "all_arb_sang___8",  "all_mois_sang___1",
+"all_mois_sang___2", "all_mois_sang___3", "all_mois_sang___4", "all_mois_sang___5", "all_mois_sang___6", "all_gra_sang___1", 
+"all_gra_sang___2",  "all_gra_sang___3",  "all_gra_sang___4",  "all_gra_sang___5",  "all_gra_sang___6",  "all_gra_sang___7", 
+"all_aca_sang___1",  "all_aca_sang___2")], 1, function(x) ifelse(any(x == 1), 1, 0))                          
+
+Data$Number_sensitisations <- apply(Data[,c("all_ani_sang___1", "all_ani_sang___2",  "all_ani_sang___3",  "all_ani_sang___4",  "all_ani_sang___5",  "all_ani_sang___6", 
+"all_ani_sang___7",  "all_ani_sang___8",  "all_ani_sang___9",  "all_arb_sang___1",  "all_arb_sang___2",  "all_arb_sang___3", 
+"all_arb_sang___4",  "all_arb_sang___5",  "all_arb_sang___6",  "all_arb_sang___7",  "all_arb_sang___8",  "all_mois_sang___1",
+"all_mois_sang___2", "all_mois_sang___3", "all_mois_sang___4", "all_mois_sang___5", "all_mois_sang___6", "all_gra_sang___1", 
+"all_gra_sang___2",  "all_gra_sang___3",  "all_gra_sang___4",  "all_gra_sang___5",  "all_gra_sang___6",  "all_gra_sang___7", 
+"all_aca_sang___1",  "all_aca_sang___2")], 1, function(x) sum(x,na.rm=F))                          
+
+Data$Eczema <- ifelse( Data$his_eczema___1 == 1, 0, ifelse( Data$his_eczema___2 == 1,1, ifelse( Data$his_eczema___3 == 1,2,NA)) )
+
+Data$Rhinitis <- ifelse( Data$his_rhinite___1 == 1, 0, ifelse( Data$his_rhinite___2 == 1,1, ifelse( Data$his_rhinite___3 == 1,2, ifelse( Data$his_rhinite___4 == 1,3,NA ))) )
+
+Data$Food_allergy <- ifelse( Data$his_all_ali___1 == 1, 0, ifelse( Data$his_all_ali___2 == 1,1, ifelse( Data$his_all_ali___3 == 1,2,NA)) )
+
+Data$Chronic_sinusitis <- ifelse( Data$his_sinusite___1 == 1, 0, ifelse( Data$his_sinusite___2 == 1,1, ifelse( Data$his_sinusite___3 == 1,2,NA)) )
+
+Data$Nasal_Polyps <- ifelse( Data$his_polypose___1 == 1, 0, ifelse( Data$his_polypose___2 == 1,1, ifelse( Data$his_polypose___3 == 1,2,NA)) )
+
+Data$Attack_vs_Pre_FEV1_L_12m <- Data$fp_vems_obs_pre_l - Data$fp_bvems_l
+
+Data$Attack_vs_Pre_FEV1_relative_12m <- ((Data$fp_vems_obs_pre_l - Data$fp_bvems_l)/Data$fp_bvems_l)*100
+
+Data$V1_Revers_FEF2575_ml <- (Data$fp_demm_obs_post_l_s - Data$fp_demm_obs_pre_l_s)*1000
+
+Data$V1_Revers_FEF2575_PORC <- ((Data$fp_demm_obs_post_l_s - Data$fp_demm_obs_pre_l_s)/Data$fp_demm_obs_pre_l_s)*100
+
+Data$V2_FEF2575_Revers_ml <- (Data$fp_demm_obs_post_l_s_v2 - Data$fp_demm_obs_pre_l_s_v2)*1000
+
+Data$V2_FEF2575_Revers_PORC <- ((Data$fp_demm_obs_post_l_s_v2 - Data$fp_demm_obs_pre_l_s_v2)/Data$fp_demm_obs_pre_l_s_v2)*100
+
+Data <- Data %>%
+  group_by(part_id) %>%
+  mutate(  V2_V1_Pre_FEV1_L =  ifelse(  n() == 1, NA, last(na.omit(fp_vems_obs_pre_l_v2)) - first(fp_vems_obs_pre_l) ),    
+           V2_V1_Pre_FEV1_PORC =  ifelse(  n() == 1, NA, last(na.omit(fp_vems_obs_pre_pour_v2)) - first(fp_vems_obs_pre_pour) ),
+           V2_V1_Pre_FEV1_PORC_change =  ifelse(  n() == 1, NA, ((last(na.omit(fp_vems_obs_pre_l_v2)) - first(fp_vems_obs_pre_l))/first(fp_vems_obs_pre_l))*100 ),
+           V2_V1_Pre_FVC_L =  ifelse(  n() == 1, NA, last(na.omit(fp_cvf_obs_pre_l_v2)) - first(fp_cvf_obs_pre_l) ),    
+           V2_V1_Pre_FVC_PORC =  ifelse(  n() == 1, NA, last(na.omit(fp_cvf_obs_pre_pour_v2)) - first(fp_cvf_obs_pre_pour) ),
+           V2_V1_Pre_FVC_PORC_change =  ifelse(  n() == 1, NA, ((last(na.omit(fp_cvf_obs_pre_l_v2)) - first(fp_cvf_obs_pre_l))/first(fp_cvf_obs_pre_l))*100 ),
+           V2_V1_Post_FEV1_L =  ifelse(  n() == 1, NA, last(na.omit(fp_vems_obs_post_l_v2)) - first(fp_vems_obs_post_l) ),    
+           V2_V1_Post_FEV1_PORC =  ifelse(  n() == 1, NA, last(na.omit(fp_vems_obs_post_pour_v2)) - first(fp_vems_obs_post_pour) ),
+           V2_V1_Post_FEV1_PORC_change =ifelse( n() == 1, NA, ((last(na.omit(fp_vems_obs_post_l_v2)) - first(fp_vems_obs_post_l))/first(fp_vems_obs_post_l))*100 ),
+           V2_V1_Post_FVC_L =  ifelse(  n() == 1, NA, last(na.omit(fp_cvf_obs_post_l_v2)) - first(fp_cvf_obs_post_l) ),    
+           V2_V1_Post_FVC_PORC =  ifelse(  n() == 1, NA, last(na.omit(fp_cvf_obs_post_pour_v2)) - first(fp_cvf_obs_post_pour) ),
+           V2_V1_Post_FVC_PORC_change =ifelse( n() == 1, NA, ((last(na.omit(fp_cvf_obs_post_l_v2)) - first(fp_cvf_obs_post_l))/first(fp_cvf_obs_post_l))*100 ),
+           V2_V1_Pre_FEF2575_L =  ifelse(  n() == 1, NA, last(na.omit(fp_demm_obs_pre_l_s_v2)) - first(fp_demm_obs_pre_l_s) ),    
+           V2_V1_Pre_FEF2575_PORC =  ifelse(  n() == 1, NA, last(na.omit(fp_demm_obs_pre_pour_v2)) - first(fp_demm_obs_pre_pour) ),
+           V2_V1_pre_FEF2575_POR_change =ifelse( n() == 1, NA, ((last(na.omit(fp_demm_obs_pre_pour_v2)) - first(fp_demm_obs_pre_pour))/first(fp_demm_obs_pre_pour))*100 ),
+           V2_V1_POST_FEF2575_L =  ifelse(  n() == 1, NA, last(na.omit(fp_demm_obs_post_l_s_v2)) - first(fp_demm_obs_post_l_s) ),    
+           V2_V1_POST_FEF2575_PORC =  ifelse(  n() == 1, NA, last(na.omit(fp_demm_obs_post_pour_v2)) - first(fp_demm_obs_post_pour) ),
+           V2_V1_POST_FEF2575_POR_change =ifelse( n() == 1, NA, ((last(na.omit(fp_demm_obs_post_l_s_v2)) - first(fp_demm_obs_post_l_s))/first(fp_demm_obs_post_l_s))*100 ),
+           V2_V1_Pre_PEF_L =  ifelse(  n() == 1, NA, last(na.omit(fp_dep_obs_pre_l_m_v2)) - first(fp_dep_obs_pre_l_m) ),    
+           V2_V1_Pre_PEF_PORC =  ifelse(  n() == 1, NA, last(na.omit(fp_dep_obs_pre_pour_v2)) - first(fp_dep_obs_pre_pour) ),
+           V2_V1_pre_PEF_PORC_change =ifelse( n() == 1, NA, ((last(na.omit(fp_dep_obs_pre_l_m_v2)) - first(fp_dep_obs_pre_l_m))/first(fp_dep_obs_pre_l_m))*100 ),
+           V2_V1_POST_PEF_L =  ifelse(  n() == 1, NA, last(na.omit(fp_dep_obs_post_l_m_v2)) - first(fp_dep_obs_post_l_m) ),    
+           V2_V1_POST_PEF_PORC =  ifelse(  n() == 1, NA, last(na.omit(fp_dep_obs_post_pour_v2)) - first(fp_dep_obs_post_pour) ),
+           V2_V1_Post_PEF_PORC_change =ifelse( n() == 1,NA,((last(na.omit(fp_dep_obs_post_l_m_v2)) - first(fp_dep_obs_post_l_m))/first(fp_dep_obs_post_l_m))*100 )
+           )
+
+Data$fp_r5_obs_pre <- (Data$fp_r5_obs_pre)/10.1972
+Data$fp_r5_obs_pre_v2 <- (Data$fp_r5_obs_pre_v2)/10.1972
+
+Data$fp_r19_obs_pre <- (Data$fp_r19_obs_pre)/10.1972
+Data$fp_r19_obs_pre_v2 <- (Data$fp_r19_obs_pre_v2)/10.1972
+
+Data$fp_r519_obs_pre <- (Data$fp_r519_obs_pre)/10.1972
+Data$fp_r519_obs_pre_v2 <- (Data$fp_r519_obs_pre_v2)/10.1972
+
+Data$fp_x5_obs_pre <- (Data$fp_x5_obs_pre)/10.1972
+Data$fp_x5_obs_pre_v2 <- (Data$fp_x5_obs_pre_v2)/10.1972
+
+Data$fp_ax_obs_pre <- (Data$fp_ax_obs_pre)/10.1972
+Data$fp_ax_obs_pre_v2 <- (Data$fp_ax_obs_pre_v2)/10.1972
+
+Data$fp_r5_obs_post <- (Data$fp_r5_obs_post)/10.1972
+Data$fp_r5_obs_post_v2 <- (Data$fp_r5_obs_post_v2)/10.1972
+
+Data$fp_r19_obs_post <- (Data$fp_r19_obs_post)/10.1972
+Data$fp_r19_obs_post_v2 <- (Data$fp_r19_obs_post_v2)/10.1972
+
+Data$fp_r519_obs_post <- (Data$fp_r519_obs_post)/10.1972
+Data$fp_r519_obs_post_v2 <- (Data$fp_r519_obs_post_v2)/10.1972
+
+Data$fp_x5_obs_post <- (Data$fp_x5_obs_post)/10.1972
+Data$fp_x5_obs_post_v2 <- (Data$fp_x5_obs_post_v2)/10.1972
+
+Data$fp_ax_obs_post <- (Data$fp_ax_obs_post)/10.1972
+Data$fp_ax_obs_post_v2 <- (Data$fp_ax_obs_post_v2)/10.1972
+
+
+Data$V1_R5R19_Revers <- Data$fp_r519_obs_post - Data$fp_r519_obs_pre
+Data$V1_R5R19_Revers_porc <- ((Data$fp_r519_obs_post - Data$fp_r519_obs_pre)/Data$fp_r519_obs_pre)*100
+
+Data <- Data %>%
+  group_by(part_id) %>%
+  mutate(  V2_V1_R5_Diff_PORC_Pred =  ifelse(  n() == 1, NA, last(na.omit(fp_r5_obs_prepour_v2)) - first(fp_r5_obs_prepour) ),    
+           V2_V1_R5_Diff_PORC_Camb =  ifelse(  n() == 1, NA, ((last(na.omit(fp_r5_obs_pre_v2)) - first(fp_r5_obs_pre))/first(fp_r5_obs_pre))*100 ),
+           V2_V1_R19_Diff_PORC_Pred =  ifelse(  n() == 1, NA, last(na.omit(fp_r19_obs_prepour_v2)) - first(fp_r19_obs_prepour) ),    
+           V2_V1_R19_Diff_PORC_Camb =  ifelse(  n() == 1, NA, ((last(na.omit(fp_r19_obs_pre_v2)) - first(fp_r19_obs_pre))/first(fp_r19_obs_pre))*100 ),
+           V2_V1_R5R19_Diff_PORC_Pred =  ifelse(  n() == 1, NA, last(na.omit(fp_r519_obs_prepour_v2)) - first(fp_r519_obs_prepour) ),    
+           V2_V1_R5R19_Diff_PORC_Camb =  ifelse(  n() == 1, NA, ((last(na.omit(fp_r519_obs_pre_v2)) - first(fp_r519_obs_pre))/first(fp_r519_obs_pre))*100 ),
+           V2_V1_X5_Diff_PORC_Pred =  ifelse(  n() == 1, NA, last(na.omit(fp_x5_obs_prepour_v2)) - first(fp_x5_obs_prepour) ),    
+           V2_V1_X5_Diff_PORC_Camb =  ifelse(  n() == 1, NA, ((last(na.omit(fp_x5_obs_pre_v2)) - first(fp_x5_obs_pre))/first(fp_x5_obs_pre))*100 ),
+           V2_V1_AX_Diff_PORC_Pred =  ifelse(  n() == 1, NA, last(na.omit(fp_ax_obs_prepour_v2)) - first(fp_ax_obs_prepour) ),    
+           V2_V1_AX_Diff_PORC_Camb =  ifelse(  n() == 1, NA, ((last(na.omit(fp_ax_obs_pre_v2)) - first(fp_ax_obs_pre))/first(fp_ax_obs_pre))*100 ),
+           V2_V1_BloodEOS_Abso = ifelse(  n() == 1, NA, last(na.omit(ea_pds_eos_va_v2)) - first(ea_pds_eos_va) ), 
+           V2_V1_CRP = ifelse(  n() == 1, NA, last(na.omit(ea_pds_pcreac_v2)) - first(ea_pds_pcreac) ),
+           V2_V1_PROCAL = ifelse(  n() == 1, NA, last(na.omit(ea_pds_pcal_v2)) - first(ea_pds_pcal) )  )
+
+Data$V1_Blood_NEU_LYM_Ratio <- (Data$ea_pds_neu_va/Data$ea_pds_lym_va)
+
+Data$V2_Blood_NEU_LYM_Ratio <- (Data$ea_pds_neu_va_v2/Data$ea_pds_lym_va_v2)
+
+Data$V1_MULTI_Pos <- apply(Data[,c("ea_cov_pcr_pos___1",  "ea_cov_pcr_pos___2",  "ea_cov_pcr_pos___3",  "ea_cov_pcr_pos___4",  "ea_cov_pcr_pos___5", 
+"ea_cov_pcr_pos___6",  "ea_cov_pcr_pos___7",  "ea_cov_pcr_pos___8",  "ea_cov_pcr_pos___9",  "ea_cov_pcr_pos___10",
+"ea_cov_pcr_pos___11", "ea_cov_pcr_pos___12", "ea_cov_pcr_pos___13", "ea_cov_pcr_pos___14", "ea_cov_pcr_pos___15",
+"ea_cov_pcr_pos___16", "ea_cov_pcr_pos___17")], 1, function(x) ifelse(any(x == 1), 1, 0))  
+
+Data <- Data %>%
+  group_by(part_id) %>%
+  mutate(  V2_V1_mRC =  ifelse(  n() == 1, NA, last(na.omit(mrc_score)) - first(mrc_score) ),
+           V2_V1_ACQ5 =  ifelse(  n() == 1, NA, nth(na.omit(acq5_moy),2) - first(acq5_moy) ),
+           V2_V1_VAS =  ifelse(  n() == 1, NA, last(na.omit(vas_total)) - first(vas_total) ))
+
+#Prepare Master Excel file 
+Master <- Data %>%
+dplyr::select(c("part_id", "redcap_event_name", "ID", "part_type", "exclusion_pt", "exclusion_pour", "date_v1", "v2_date", "info_v3_date", "v2_delai", "info_v3_delai", "part_age", "part_sexe", "part_genre", "part_popul", "part_imc", "consom_tabac", "consom_pa", "consom_cig_elect", "consom_cannabis", "his_age_diag", "his_dur_diag", "his_crise_total", "his_crise_corti", "his_crise_combi", "his_crise_antibio", "his_crise_augrx", "his_visite_urgence_2", "his_visite_urgence", "his_intensif_vie", "his_intubation_vie", "med_gina", "On_any_ICS_only", "ICS_ONLY_FP_equivalent_daily_dose", "ON_any_ICS_LABA_only", "ICS_LABA_only_FP_equivalent_daily_dose", "ON_any_ICS_LABA_LAMA_only", "ICS_LABA_LAMA_only_FP_equivalent_daily_dose", "TOTAL_FP_equivalent_daily_dose", "med_csi_pour", "On_any_ICS_LABA", "On_any_LAMA", "On_any_SABA", "On_MART", "med_anta_leuco1", "On_any_nasal_ICS", "med_antibio___2", "med_autres___16", "Any_IgE_Resp_Allergens", "Number_sensitisations", "all_ani_sang___1", "all_ani_sang___2", "all_ani_sang___3", "all_ani_sang___4", "all_ani_sang___5", "all_ani_sang___6", "all_ani_sang___7", "all_ani_sang___8", "all_ani_sang___9", "all_arb_sang___1", "all_arb_sang___2", "all_arb_sang___3", "all_arb_sang___4", "all_arb_sang___5", "all_arb_sang___6", "all_arb_sang___7", "all_arb_sang___8", "all_mois_sang___1", "all_mois_sang___2", "all_mois_sang___3", "all_mois_sang___4", "all_mois_sang___5", "all_mois_sang___6", "all_gra_sang___1", "all_gra_sang___2", "all_gra_sang___3", "all_gra_sang___4", "all_gra_sang___5",
+                "all_gra_sang___6", "all_gra_sang___7", "all_aca_sang___1", "all_aca_sang___2", "Eczema", "Rhinitis", "Food_allergy", "Chronic_sinusitis", "Nasal_Polyps", "his_cox_asa", "his_diag_aos", "his_abpa", "his_egpa", "his_bronchie", "comorbi_index_total", "comorbi_liste___1", "comorbi_liste___4", "comorbi_liste___2", "comorbi_liste___6", "comorbi_liste___5", "fp_bvems_l", "fp_bvems_pour", "fp_bcvf_l", "fp_bcvf_pour", "Attack_vs_Pre_FEV1_L_12m", "Attack_vs_Pre_FEV1_relative_12m", "fp_vems_obs_pre_l", "fp_vems_obs_pre_pour", "fp_cvf_obs_pre_l", "fp_cvf_obs_pre_pour", "fp_vems_cvf_obs_pre", "fp_vems_obs_post_l", "fp_vems_obs_post_pour", "fp_vems_rev_ml", "fp_pour_rev_vems", "fp_cvf_obs_post_l", "fp_cvf_obs_post_pour", "fp_vems_cvf_obs_post", "fp_demm_obs_pre_l_s", "fp_demm_obs_pre_pour", "fp_demm_obs_post_l_s", "fp_demm_obs_post_pour", "V1_Revers_FEF2575_ml", "V1_Revers_FEF2575_PORC", "fp_dep_obs_pre_l_m", "fp_dep_obs_pre_pour", "fp_dep_obs_post_l_m", "fp_dep_obs_post_pour", "fp_dep_rev_l_min", "fp_pour_rev_dep", "fp_vems_obs_pre_l_v2", "fp_vems_obs_pre_pour_v2", "fp_cvf_obs_pre_l_v2", "fp_cvf_obs_pre_pour_v2", "fp_vems_cvf_obs_pre_v2", "fp_vems_obs_post_l_v2", "fp_vems_obs_post_pour_v2", "fp_vems_rev_ml_v2", "fp_pour_rev_vems_v2", "fp_cvf_obs_post_l_v2", "fp_cvf_obs_post_pour_v2", "fp_vems_cvf_obs_post_v2", "fp_demm_obs_pre_l_s_v2", "fp_demm_obs_pre_pour_v2", "fp_demm_obs_post_l_s_v2", "fp_demm_obs_post_pour_v2", "V2_FEF2575_Revers_ml", "V2_FEF2575_Revers_PORC", "fp_dep_obs_pre_l_m_v2", "fp_dep_obs_pre_pour_v2", "fp_dep_obs_post_l_m_v2", "fp_dep_obs_post_pour_v2", "fp_dep_rev_l_min_v2", "fp_pour_rev_dep_v2", "V2_V1_Pre_FEV1_L", "V2_V1_Pre_FEV1_PORC", "V2_V1_Pre_FEV1_PORC_change", "V2_V1_Pre_FVC_L", "V2_V1_Pre_FVC_PORC", "V2_V1_Pre_FVC_PORC_change", "V2_V1_Post_FEV1_L", "V2_V1_Post_FEV1_PORC", "V2_V1_Post_FEV1_PORC_change", "V2_V1_Post_FVC_L", "V2_V1_Post_FVC_PORC", "V2_V1_Post_FVC_PORC_change", "V2_V1_Pre_FEF2575_L", "V2_V1_Pre_FEF2575_PORC", "V2_V1_pre_FEF2575_POR_change", "V2_V1_POST_FEF2575_L", "V2_V1_POST_FEF2575_PORC", "V2_V1_POST_FEF2575_POR_change", "V2_V1_Pre_PEF_L", "V2_V1_Pre_PEF_PORC", "V2_V1_pre_PEF_PORC_change", "V2_V1_POST_PEF_L", "V2_V1_POST_PEF_PORC", "V2_V1_Post_PEF_PORC_change", "fp_r5_obs_pre", "fp_r5_obs_prepour", "fp_r19_obs_pre", "fp_r19_obs_prepour", "fp_r519_obs_pre", "fp_r519_obs_prepour", "fp_x5_obs_pre", "fp_x5_obs_prepour", "fp_ax_obs_pre", "fp_ax_obs_prepour", "fp_r5_obs_post", "fp_r5_obs_postpour", "fp_r19_obs_post", "fp_r19_obs_postpour", "fp_r519_obs_post", "fp_r519_obs_postpour", "fp_x5_obs_post", "fp_x5_obs_postpour", "fp_ax_obs_post", "fp_ax_obs_postpour", "fp_r5_obs_pre_v2",
+                "fp_r5_obs_prepour_v2", "fp_r19_obs_pre_v2", "fp_r19_obs_prepour_v2", "fp_r519_obs_pre_v2", "fp_r519_obs_prepour_v2", "fp_x5_obs_pre_v2", "fp_x5_obs_prepour_v2", "fp_ax_obs_pre_v2", "fp_ax_obs_prepour_v2", "fp_r5_obs_post_v2", "fp_r5_obs_postpour_v2", "fp_r19_obs_post_v2", "fp_r19_obs_postpour_v2", "fp_r519_obs_post_v2", "fp_r519_obs_postpour_v2", "fp_x5_obs_post_v2", "fp_x5_obs_postpour_v2", "fp_ax_obs_post_v2", "fp_ax_obs_postpour_v2", "V2_V1_R5_Diff_PORC_Pred", "V2_V1_R5_Diff_PORC_Camb", "V2_V1_R19_Diff_PORC_Pred", "V2_V1_R19_Diff_PORC_Camb", "V2_V1_R5R19_Diff_PORC_Pred", "V2_V1_R5R19_Diff_PORC_Camb", "V2_V1_X5_Diff_PORC_Pred", "V2_V1_X5_Diff_PORC_Camb", "V2_V1_AX_Diff_PORC_Pred", "V2_V1_AX_Diff_PORC_Camb", "ea_pds_ige", "ea_pds_eos_va", "ea_pds_eos_vr", "ea_olo_eos_va", "ea_olo_eos_vr", "ea_exp_eos_pour", "ea_feno_niox", "ea_pds_eos_va_v2", "ea_pds_eos_vr_v2", "ea_olo_eos_va_v2", "ea_olo_eos_vr_v2", "ea_exp_eos_pour_v2", "ea_feno_niox_v2", "V2_V1_BloodEOS_Abso", "ea_pds_gb_va", "ea_pds_neu_va", "ea_pds_neu_vr", "ea_pds_lym_va", "ea_pds_lym_vr", "V1_Blood_NEU_LYM_Ratio", "ea_pds_mono_va", "ea_pds_mono_vr", "ea_pds_baso_va", "ea_pds_baso_vr", "ea_pds_gb_va_v2", "ea_pds_neu_va_v2", "ea_pds_neu_vr_v2", "ea_pds_lym_va_v2", "ea_pds_lym_vr_v2", "V2_Blood_NEU_LYM_Ratio", "ea_pds_mono_va_v2", "ea_pds_mono_vr_v2", "ea_pds_baso_va_v2", "ea_pds_baso_vr_v2", "ea_pds_pcreac", "ea_pds_pcal", "ea_pds_pcreac_v2", "ea_pds_pcal_v2", "V2_V1_CRP", "V2_V1_PROCAL", "V1_MULTI_Pos", "ea_cov_pcr_pos___8", "ea_exp_micro_res", "v2_antibio", "ea_exp_micro_res_v2", "ea_exp_tcc", "ea_exp_acn", "ea_exp_via_pour", "ea_exp_bronch_pour", "ea_exp_contamin_pour", "ea_exp_neu_pour", "ea_exp_lym_pour", "ea_exp_macro_pour", "ea_exp_tcc_pour_v2", "ea_exp_acn_pour_v2", "ea_exp_via_pour_v2", "ea_exp_bronch_pour_v2", "ea_exp_contamin_pour_v2", "ea_exp_neu_pour_v2", "ea_exp_lym_pour_v2", "ea_exp_macro_pour_v2", "mrc_score", "V2_V1_mRC", "acq5_moy", "V2_V1_ACQ5", "vas_total", "V2_V1_VAS", "vas_1", "vas_2", "vas_3", "vas_4", "vas_5", "vas_6", "pvcdi_total", "nij_total", "hads_anx_total", "hads_dep_total", "ma_fenoj1", "ma_fenoj2", "ma_fenoj3", "ma_fenoj4", "ma_fenoj5", "ma_fenoj6", "ma_fenoj7", "ma_depj1", "ma_depj2", "ma_depj3", "ma_depj4", "ma_depj5", "ma_depj6", "ma_depj7", "ma_acd_q1j1", "ma_acd_q2j1", "ma_acd_q3j1", "ma_acd_q4j1", "ma_acd_q5j1", "ma_total_j1", "ma_moy_j1", "ma_acd_q1j2", "ma_acd_q2j2", "ma_acd_q3j2", "ma_acd_q4j2", "ma_acd_q5j2", "ma_total_j2", "ma_moy_j2", "ma_acd_q1j3", "ma_acd_q2j3", "ma_acd_q3j3", "ma_acd_q4j3", "ma_acd_q5j3", "ma_total_j3", "ma_moy_j3", "ma_acd_q1j4", "ma_acd_q2j4", "ma_acd_q3j4", "ma_acd_q4j4", "ma_acd_q5j4", "ma_total_j4", "ma_moy_j4", "ma_acd_q1j5", "ma_acd_q2j5", "ma_acd_q3j5", "ma_acd_q4j5", "ma_acd_q5j5", "ma_total_j5", "ma_moy_j5", "ma_acd_q1j6", "ma_acd_q2j6", "ma_acd_q3j6", "ma_acd_q4j6", "ma_acd_q5j6", "ma_total_j6", "ma_moy_j6", "ma_acd_q1j7", "ma_acd_q2j7", "ma_acd_q3j7", "ma_acd_q4j7", "ma_acd_q5j7", "ma_total_j7", "ma_moy_j7",  "ea_dec_val", "ea_mes_fval", "info_v3_bio_presc", "info_v3_bio_name", "v90_acq5_moy", "v90_dep", "v90_cso", "v90_antibio", "v90_modif_rx", "ea_exp_micro_pos",    "v2_effsec_g2","v2_effsec_g3","v2_effsec_g4","v2_effsec_g5","v2_effsec_g6","v2_effsec_g7","v2_effsec_g8","v2_effsec_g9","v2_effsec_g10","v2_effsec_g11","v2_effsec_g12","v2_effsec_com12","ea_olo_type","ea_olo_typev2","ea_olo_rep"  ))
+
+#Rename variable
+
+Master <- Master %>%
+  rename( REDCAP_SEQ_NO = part_id,
+          HEALTHY_OR_ASTHMA = part_type, 
+          EXCLUDE = exclusion_pt,
+          EXCLUDE_REASON = exclusion_pour,
+          DATE_V1 = date_v1,
+          DATE_V2 = v2_date,
+          DATE_V3 = info_v3_date,
+          DELAY_V1_V2_days = v2_delai,
+          DELAY_V2_V3_days = info_v3_delai,
+          Age_at_study_enrollment = part_age,
+          Sex = part_sexe,
+          Gender = part_genre,
+          Ethnicity = part_popul,
+          BMI = part_imc,
+          Tobacco = consom_tabac,
+          Pack_years = consom_pa,
+          E_cig = consom_cig_elect, 
+          Cannabis = consom_cannabis,
+          Age_of_diagnosis = his_age_diag,
+          Duration_of_asthma = his_dur_diag,
+          Total_exacerbations_12m = his_crise_total,
+          Exacerbations_OCS = his_crise_corti,
+          Exacerbations_OCs_plus_ABs = his_crise_combi,
+          Exacerbations_ABs = his_crise_antibio,
+          Exacerbations_moderate = his_crise_augrx,
+          Hospital_admissions_12m = his_visite_urgence_2,
+          ED_visits_12m = his_visite_urgence,
+          Ever_been_ICU_for_asthma = his_intensif_vie,
+          Ever_been_ventilated_for_asthma = his_intubation_vie,
+          GINA_Step = med_gina,
+          Adherence_PORC_ICS_presc_renewed_per_year = med_csi_pour,
+          On_any_LTRA = med_anta_leuco1,
+          On_macrolides = med_antibio___2,
+          On_theophylline = med_autres___16,
+          IgE_CHAT	= all_ani_sang___1 , 
+          IgE_Chien	= all_ani_sang___2 , 
+          IgE_Cheval =	all_ani_sang___3 , 
+          IgE_Bovin	= all_ani_sang___4 , 
+          IgE_Plumes =	 all_ani_sang___5 , 
+          IgE_Hamster	= all_ani_sang___6 , 
+          IgE_Souris	= all_ani_sang___7 , 
+          IgE_Lapin	= all_ani_sang___8 , 
+          IgE_Coquerelle_Blatte =	 all_ani_sang___9 , 
+          IgE_Frene	= all_arb_sang___1 ,
+          IgE_Peuplier =	all_arb_sang___2 ,
+          IgE_Bouleau	 = all_arb_sang___3 ,
+          IgE_Orme = all_arb_sang___4 ,
+          IgE_Erablr =	 all_arb_sang___5 ,
+          IgE_Chene	 = all_arb_sang___6 ,
+          IgE_Cedre	= all_arb_sang___7 ,
+          IgE_MELANGE_ARBRES =	 all_arb_sang___8 ,
+          IgE_Alternaria	= all_mois_sang___1 ,
+          IgE_Hormodendrum_Clasporium = all_mois_sang___2 ,	
+          IgE_ASPERGILLUS_FUMIGATUS	 = all_mois_sang___3 ,
+          IgE_Basidiomycetes	= all_mois_sang___4 ,
+          IgE_Penicillium	 = all_mois_sang___5 ,
+          IgE_MELANGE_MOISISSURES =	all_mois_sang___6 ,
+          IgE_MELANGES_GRAMINEES = all_gra_sang___1 ,
+          IgE_Phleole	= all_gra_sang___2 ,
+          IgE_Ivraie_vivace =	 all_gra_sang___3 ,
+          IgE_MELANGE_HERBACEES_PLANTAIN = 	all_gra_sang___4 , 
+          IgE_Armoise	= all_gra_sang___5 ,
+          IgE_Plantain =	all_gra_sang___6 , 
+          IgE_Lampourde	 = all_gra_sang___7 ,
+          IgE_D_FARINAE	 = all_aca_sang___1,
+          IgE_D_PTERONYSSINUS = all_aca_sang___2,
+          Aspirin_Exacerbated_Respiratory_Disease = his_cox_asa,
+          Obstructive_sleep_apnea = his_diag_aos,
+          ABPA = his_abpa, 
+          EGPA = his_egpa,
+          Bronchiectasis = his_bronchie,
+          charlson_total = comorbi_index_total,
+          charlson_q1 = comorbi_liste___1,
+          charlson_q4 = comorbi_liste___4,
+          charlson_q2 = comorbi_liste___2,
+          charlson_q6 = comorbi_liste___6,
+          charlson_q5 = comorbi_liste___5,
+          V1_Pre_FEV1_L_12m = fp_bvems_l,
+          V1_Pre_FEV1_PORC_12m = fp_bvems_pour,
+          V1_Pre_CVF_L_12m = fp_bcvf_l,
+          V1_Pre_CVF_PORC_12m = fp_bcvf_pour,
+          V1_Pre_FEV1_L = fp_vems_obs_pre_l,
+          V1_Pre_FEV1_PORC = fp_vems_obs_pre_pour,
+          V1_Pre_CVF_L = fp_cvf_obs_pre_l,
+          V1_Pre_CVF_PORC = fp_cvf_obs_pre_pour,
+          V1_Pre_FEV1_FVC_ratio = fp_vems_cvf_obs_pre,
+          V1_Post_FEV1_L = fp_vems_obs_post_l,
+          V1_Post_FEV1_PORC = fp_vems_obs_post_pour,
+          V1_FEV1_Revers_ml = fp_vems_rev_ml,
+          V1_FEV1_Revers_PORC = fp_pour_rev_vems,
+          V1_Post_CVF_L = fp_cvf_obs_post_l,
+          V1_Post_CVF_PORC = fp_cvf_obs_post_pour,
+          V1_Post_FEV1_FVC_ratio = fp_vems_cvf_obs_post,
+          V1_Pre_FEF2575_L = fp_demm_obs_pre_l_s,
+          V1_Pre_FEF2575_PORC = fp_demm_obs_pre_pour,
+          V1_Post_FEF2575_L =  fp_demm_obs_post_l_s,
+          V1_Post_FEF2575_PORC = fp_demm_obs_post_pour,
+          V1_Pre_PEF_L =  fp_dep_obs_pre_l_m,
+          V1_Pre_PEF_PORC = fp_dep_obs_pre_pour,
+          V1_Post_PEF_L = fp_dep_obs_post_l_m,
+          V1_Post_PEF_PORC = fp_dep_obs_post_pour,
+          V1_Revers_PEF_L =  fp_dep_rev_l_min,
+          V1_Revers_PEF_PORC =  fp_pour_rev_dep,
+          V2_Pre_FEV1_L = fp_vems_obs_pre_l_v2,
+          V2_Pre_FEV1_PORC = fp_vems_obs_pre_pour_v2,
+          V2_Pre_CVF_L = fp_cvf_obs_pre_l_v2,
+          V2_Pre_CVF_PORC = fp_cvf_obs_pre_pour_v2,
+          V2_Pre_FEV1FVC_ratio = fp_vems_cvf_obs_pre_v2,
+          V2_Post_FEV1_L = fp_vems_obs_post_l_v2,
+          V2_Post_FEV1_PORC = fp_vems_obs_post_pour_v2,
+          V2_FEV1_Revers_L = fp_vems_rev_ml_v2,
+          V2_FEV1_Revers_PORC = fp_pour_rev_vems_v2,
+          V2_Post_CVF_L = fp_cvf_obs_post_l_v2,
+          V2_Post_CVF_PORC = fp_cvf_obs_post_pour_v2,
+          V2_Post_FEV1FVC_ratio = fp_vems_cvf_obs_post_v2,
+          V2_Pre_FEF2575_L = fp_demm_obs_pre_l_s_v2,
+          V2_Pre_FEF2575_PORC = fp_demm_obs_pre_pour_v2,
+          V2_Post_FEF2575_L =  fp_demm_obs_post_l_s_v2,
+          V2_Post_FEF2575_PORC = fp_demm_obs_post_pour_v2,
+          V2_Pre_PEF_L = fp_dep_obs_pre_l_m_v2, 
+          V2_Pre_PEF_PORC = fp_dep_obs_pre_pour_v2,
+          V2_Post_PEF_L = fp_dep_obs_post_l_m_v2,
+          V2_Post_PEF_PORC = fp_dep_obs_post_pour_v2,
+          V2_PEF_Revers_L =  fp_dep_rev_l_min_v2,
+          V2_PEF_Revers_PORC = fp_pour_rev_dep_v2,
+          V1_Pre_R5 = fp_r5_obs_pre,
+          V1_Pre_R5_PORC = fp_r5_obs_prepour,
+          V1_Pre_R19 = fp_r19_obs_pre,
+          V1_Pre_R19_PORC =  fp_r19_obs_prepour,
+          V1_Pre_R5R19 = fp_r519_obs_pre,
+          V1_Pre_R5R19_PORC =  fp_r519_obs_prepour,
+          V1_Pre_X5 = fp_x5_obs_pre,
+          V1_Pre_X5_PORC = fp_x5_obs_prepour,
+          V1_Pre_AX = fp_ax_obs_pre,
+          V1_Pre_AX_PORC = fp_ax_obs_prepour,
+          V1_Post_R5 = fp_r5_obs_post,
+          V1_Post_R5_PORC = fp_r5_obs_postpour,
+          V1_Post_R19 = fp_r19_obs_post,
+          V1_Post_R19_PORC = fp_r19_obs_postpour,
+          V1_Post_R5R19 = fp_r519_obs_post,
+          V1_Post_R5R19_PORC = fp_r519_obs_postpour,
+          V1_Post_X5 = fp_x5_obs_post,
+          V1_Post_X5_PORC =  fp_x5_obs_postpour,
+          V1_Post_AX = fp_ax_obs_post,
+          V1_Post_AX_PORC = fp_ax_obs_postpour,
+          V2_Pre_R5 = fp_r5_obs_pre_v2,
+          V2_Pre_R5_PORC = fp_r5_obs_prepour_v2,
+          V2_Pre_R19 = fp_r19_obs_pre_v2,
+          V2_Pre_R19_PORC =  fp_r19_obs_prepour_v2,
+          V2_Pre_R5R19 = fp_r519_obs_pre_v2,
+          V2_Pre_R5R19_PORC = fp_r519_obs_prepour_v2,
+          V2_Pre_X5 = fp_x5_obs_pre_v2,
+          V2_Pre_X5_PORC = fp_x5_obs_prepour_v2,
+          V2_Pre_AX = fp_ax_obs_pre_v2,
+          V2_Pre_AX_PORC =  fp_ax_obs_prepour_v2,
+          V2_Post_R5 = fp_r5_obs_post_v2,
+          V2_Post_R5_PORC =  fp_r5_obs_postpour_v2,
+          V2_Post_R19 = fp_r19_obs_post_v2,
+          V2_Post_R19_PORC = fp_r19_obs_postpour_v2,
+          V2_Post_R5R19 = fp_r519_obs_post_v2,
+          V2_Post_R5R19_PORC = fp_r519_obs_postpour_v2,
+          V2_Post_X5 =  fp_x5_obs_post_v2,
+          V2_Post_X5_PORC =  fp_x5_obs_postpour_v2,
+          V2_Post_AX = fp_ax_obs_post_v2,
+          V2_Post_AX_PORC = fp_ax_obs_postpour_v2,
+          V1_IgE = ea_pds_ige,
+          V1_BloodEOS_Abso = ea_pds_eos_va,
+          V1_BloodEOS_PORC = ea_pds_eos_vr,
+          V1_OLOEOS_Abso = ea_olo_eos_va,
+          V1_OLOEOS_PORC = ea_olo_eos_vr,
+          V1_SpuEOS_PCT = ea_exp_eos_pour,
+          V1_FeNO = ea_feno_niox,
+          V2_BloodEOS_Abso = ea_pds_eos_va_v2,
+          V2_BloodEOS_PORC = ea_pds_eos_vr_v2,
+          V2_OLOEOS_Abso = ea_olo_eos_va_v2,
+          V2_OLOEOS_PORC = ea_olo_eos_vr_v2,
+          V2_SpuEOS_PCT = ea_exp_eos_pour_v2,
+          V2_FeNO = ea_feno_niox_v2,    
+          V1_WBC = ea_pds_gb_va,
+          V1_BloodNEU_Abso = ea_pds_neu_va,
+          V1_BloodNEU_PORC = ea_pds_neu_vr,
+          V1_BloodLYM_Abso = ea_pds_lym_va,
+          V1_BloodLYM_PORC = ea_pds_lym_vr,
+          V1_BloodMON_Abso = ea_pds_mono_va,
+          V1_BloodMON_PORC = ea_pds_mono_vr,
+          V1_BloodBAS_Abso = ea_pds_baso_va,
+          V1_BloodBAS_PORC = ea_pds_baso_vr,
+          V2_WBC = ea_pds_gb_va_v2,
+          V2_BloodNEU_Abso = ea_pds_neu_va_v2,
+          V2_BloodNEU_PORC = ea_pds_neu_vr_v2,
+          V2_BloodLYM_Abso = ea_pds_lym_va_v2,
+          V2_BloodLYM_PORC = ea_pds_lym_vr_v2,
+          V2_BloodMON_Abso = ea_pds_mono_va_v2,
+          V2_BloodMON_PORC = ea_pds_mono_vr_v2,
+          V2_BloodBAS_Abso = ea_pds_baso_va_v2,
+          V2_BloodBAS_PORC = ea_pds_baso_vr_v2,
+          V1_CRP = ea_pds_pcreac,
+          V1_PROCAL = ea_pds_pcal,
+          V2_CRP =  ea_pds_pcreac_v2,
+          V2_PROCAL = ea_pds_pcal_v2,
+          V1_MULTI_Pos_Rhino = ea_cov_pcr_pos___8,
+          V1_SpuCuL_Pos = ea_exp_micro_res,
+          V2_Antibiotic_treament = v2_antibio,
+          V2_SpuCul_Pos = ea_exp_micro_res_v2,
+          V1_Spu_TCC = ea_exp_tcc,
+          V1_Spu_ACN =  ea_exp_acn,
+          V1_Spu_Viab_PORC = ea_exp_via_pour,
+          V1_Spu_Bronch_PORC = ea_exp_bronch_pour,
+          V1_Spu_Contam_PORC = ea_exp_contamin_pour,
+          V1_Spu_Neu_PORC = ea_exp_neu_pour,
+          V1_Spu_Lym_PORC = ea_exp_lym_pour,
+          V1_Spu_Mac_PORC = ea_exp_macro_pour,
+          V2_Spu_TCC = ea_exp_tcc_pour_v2,
+          V2_Spu_ACN = ea_exp_acn_pour_v2,
+          V2_Spu_Viab_PORC = ea_exp_via_pour_v2,
+          V2_Spu_Bronch_PORC = ea_exp_bronch_pour_v2,
+          V2_Spu_Contam_PORC = ea_exp_contamin_pour_v2,
+          V2_Spu_Neu_PORC = ea_exp_neu_pour_v2,
+          V2_Spu_Lym_PORC = ea_exp_lym_pour_v2,
+          V2_Spu_Mac_PORC = ea_exp_macro_pour_v2,
+          V1_BloodEOS_Abso_12m = ea_dec_val,
+          V1_FeNO_12m = ea_mes_fval,
+          AE_ACNEA_GR = v2_effsec_g2,
+          AE_APPETITE_GR = v2_effsec_g3,
+          AE_HEADACHE_GR = v2_effsec_g4,
+          AE_DYSPEPSIA_GR = v2_effsec_g5,
+          AE_HYPERGLY_GR = v2_effsec_g6,
+          AE_HTA_GR = v2_effsec_g7,
+          AE_INSOMNIA_GR = v2_effsec_g8,
+          AE_SHAKE_GR = v2_effsec_g9,
+          AE_MOOD_GR = v2_effsec_g10,
+          AE_BLURRY_GR = v2_effsec_g11,
+          AE_OTHER_GR = v2_effsec_g12,
+          AE_OTHER_WHAT = v2_effsec_com12,
+          OLOEOS_Type = ea_olo_type,
+          V2_OLOEOS_Type = ea_olo_typev2,
+          OLOEOS_repnum = ea_olo_rep 
+)
+
+
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO,redcap_event_name) %>%
+  mutate(  ma_moy_j1 = mean(c(ma_acd_q1j1,ma_acd_q2j1,ma_acd_q3j1,ma_acd_q4j1,ma_acd_q5j1), na.rm=T),
+           ma_moy_j2 = mean(c(ma_acd_q1j2,ma_acd_q2j2,ma_acd_q3j2,ma_acd_q4j2,ma_acd_q5j2), na.rm=T),
+           ma_moy_j3 = mean(c(ma_acd_q1j3,ma_acd_q2j3,ma_acd_q3j3,ma_acd_q4j3,ma_acd_q5j3), na.rm=T),
+           ma_moy_j4 = mean(c(ma_acd_q1j4,ma_acd_q2j4,ma_acd_q3j4,ma_acd_q4j4,ma_acd_q5j4), na.rm=T),
+           ma_moy_j5 = mean(c(ma_acd_q1j5,ma_acd_q2j5,ma_acd_q3j5,ma_acd_q4j5,ma_acd_q5j5), na.rm=T),
+           ma_moy_j6 = mean(c(ma_acd_q1j6,ma_acd_q2j6,ma_acd_q3j6,ma_acd_q4j6,ma_acd_q5j6), na.rm=T),
+           ma_moy_j7 = mean(c(ma_acd_q1j7,ma_acd_q2j7,ma_acd_q3j7,ma_acd_q4j7,ma_acd_q5j7), na.rm=T),
+           DATE = fifelse( is.na(DATE_V1)==F,DATE_V1, fifelse( is.na(DATE_V2)==F, DATE_V2 , DATE_V3  ) ),
+           DELAY = ifelse( is.na(DELAY_V1_V2_days)==F,DELAY_V1_V2_days, ifelse( is.na(DELAY_V2_V3_days)==F,DELAY_V2_V3_days,NA) )   )
+
+
+Master <- Master[,c(1:6,392,393,7:391)]
+  
+Master <- Master %>%
+  dplyr::select(-c(9:13))
+  
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate( HEALTHY_OR_ASTHMA = first(HEALTHY_OR_ASTHMA),
+          EXCLUDE = first(EXCLUDE))
+
+
+Master$On_any_ICS_only <- ifelse( Master$redcap_event_name == "visite_1_arm_1" & is.na(Master$On_any_ICS_only) == T, 0 , Master$On_any_ICS_only )
+Master$ON_any_ICS_LABA_only <- ifelse( Master$redcap_event_name == "visite_1_arm_1" & is.na(Master$ON_any_ICS_LABA_only) == T, 0 , Master$ON_any_ICS_LABA_only )
+Master$ON_any_ICS_LABA_LAMA_only <- ifelse( Master$redcap_event_name == "visite_1_arm_1" & is.na(Master$ON_any_ICS_LABA_LAMA_only) == T, 0 , Master$ON_any_ICS_LABA_LAMA_only )
+Master$On_any_ICS_LABA <- ifelse( Master$redcap_event_name == "visite_1_arm_1" & is.na(Master$On_any_ICS_LABA) == T, 0 , Master$On_any_ICS_LABA )
+Master$On_any_LAMA <- ifelse( Master$redcap_event_name == "visite_1_arm_1" & is.na(Master$On_any_LAMA) == T, 0 , Master$On_any_LAMA )
+Master$On_any_SABA <- ifelse( Master$redcap_event_name == "visite_1_arm_1" & is.na(Master$On_any_SABA) == T, 0 , Master$On_any_SABA )
+Master$On_MART <- ifelse( Master$redcap_event_name == "visite_1_arm_1" & is.na(Master$On_MART) == T, 0 , Master$On_MART )
+Master$On_any_LTRA <- ifelse( Master$redcap_event_name == "visite_1_arm_1" & is.na(Master$On_any_LTRA) == T, 0 , Master$On_any_LTRA )
+
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate_at(c(9:95), ~ first(.))
+
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate(  Pre_FEV1_L = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_FEV1_L, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_FEV1_L,NA) ),
+           Pre_FEV1_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_FEV1_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_FEV1_PORC,NA) ),
+           Pre_CVF_L = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_CVF_L, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_CVF_L,NA) ),
+           Pre_CVF_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_CVF_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_CVF_PORC,NA) ),
+           Pre_FEV1_FVC_ratio = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_FEV1_FVC_ratio, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_FEV1FVC_ratio,NA) ),
+           Post_FEV1_L = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_FEV1_L, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_FEV1_L,NA) ),
+           Post_FEV1_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_FEV1_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_FEV1_PORC,NA) ),
+           FEV1_Revers_ml = ifelse(  redcap_event_name == "visite_1_arm_1", V1_FEV1_Revers_ml, ifelse( redcap_event_name == "visite_2_arm_1", V2_FEV1_Revers_L,NA) ),
+           FEV1_Revers_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_FEV1_Revers_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_FEV1_Revers_PORC,NA) ),
+           Post_CVF_L = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_CVF_L, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_CVF_L,NA) ),
+           Post_CVF_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_CVF_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_CVF_PORC,NA) ),
+           Post_FEV1_FVC_ratio = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_FEV1_FVC_ratio, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_FEV1FVC_ratio,NA) ),
+           Pre_FEF2575_L = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_FEF2575_L, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_FEF2575_L,NA) ),
+           Pre_FEF2575_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_FEF2575_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_FEF2575_PORC,NA) ),
+           Post_FEF2575_L = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_FEF2575_L, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_FEF2575_L,NA) ),
+           Post_FEF2575_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_FEF2575_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_FEF2575_PORC,NA) ),
+           Revers_FEF2575_ml = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Revers_FEF2575_ml, ifelse( redcap_event_name == "visite_2_arm_1", V2_FEF2575_Revers_ml,NA) ),
+           Revers_FEF2575_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Revers_FEF2575_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_FEF2575_Revers_PORC,NA) ),
+           Pre_PEF_L = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_PEF_L, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_PEF_L,NA) ),
+           Pre_PEF_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_PEF_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_PEF_PORC,NA) ),
+           Post_PEF_L = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_PEF_L, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_PEF_L,NA) ),
+           Post_PEF_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_PEF_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_PEF_PORC,NA) ),
+           Revers_PEF_L = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Revers_PEF_L, ifelse( redcap_event_name == "visite_2_arm_1", V2_PEF_Revers_L,NA) ),
+           Revers_PEF_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Revers_PEF_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_PEF_Revers_PORC,NA) )) %>%
+  dplyr::select(-c(102:149))
+
+Master <- Master[,c(1:101,341:364,102:340)]
+
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate(  Pre_R5 = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_R5, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_R5,NA) ),
+           Pre_R5_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_R5_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_R5_PORC,NA) ),
+           Pre_R19 = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_R19, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_R19,NA) ),
+           Pre_R19_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_R19_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_R19_PORC,NA) ),
+           Pre_R5R19 = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_R5R19, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_R5R19,NA) ),
+           Pre_R5R19_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_R5R19_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_R5R19_PORC,NA) ),
+           Pre_X5 = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_X5, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_X5,NA) ),
+           Pre_X5_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_X5_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_X5_PORC,NA) ),
+           Pre_AX = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_AX, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_AX,NA) ),
+           Pre_AX_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Pre_AX_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Pre_AX_PORC,NA) ),
+           Post_R5 = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_R5, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_R5,NA) ),
+           Post_R5_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_R5_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_R5_PORC,NA) ),
+           Post_R19 = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_R19, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_R19,NA) ),
+           Post_R19_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_R19_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_R19_PORC,NA) ),
+           Post_R5R19 = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_R5R19, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_R5R19,NA) ),
+           Post_R5R19_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_R5R19_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_R5R19_PORC,NA) ),
+           Post_X5 = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_X5, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_X5,NA) ),
+           Post_X5_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_X5_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_X5_PORC,NA) ),
+           Post_AX = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_AX, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_AX,NA) ),
+           Post_AX_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Post_AX_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Post_AX_PORC,NA) )) %>%
+  dplyr::select(-c(150:189))
+
+
+Master <- Master[,c(1:149,325:344,150:324)]
+
+
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate(  BloodEOS_Abso = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodEOS_Abso, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodEOS_Abso,NA) ),
+           BloodEOS_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodEOS_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodEOS_PORC,NA) ),
+           OLOEOS_Abso = ifelse(  redcap_event_name == "visite_1_arm_1", V1_OLOEOS_Abso, ifelse( redcap_event_name == "visite_2_arm_1", V2_OLOEOS_Abso,NA) ),
+           OLOEOS_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_OLOEOS_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_OLOEOS_PORC,NA) ),
+           SpuEOS_PCT = ifelse(  redcap_event_name == "visite_1_arm_1", V1_SpuEOS_PCT, ifelse( redcap_event_name == "visite_2_arm_1", V2_SpuEOS_PCT,NA) ),
+           FeNO = ifelse(  redcap_event_name == "visite_1_arm_1", V1_FeNO, ifelse( redcap_event_name == "visite_2_arm_1", V2_FeNO,NA) ),
+           WBC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_WBC, ifelse( redcap_event_name == "visite_2_arm_1", V2_WBC,NA) ),
+           BloodNEU_Abso = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodNEU_Abso, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodNEU_Abso,NA) ),
+           BloodNEU_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodNEU_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodNEU_PORC,NA) ),
+           BloodLYM_Abso = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodLYM_Abso, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodLYM_Abso,NA) ),
+           BloodLYM_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodLYM_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodLYM_PORC,NA) ),
+           Blood_NEU_LYM_Ratio = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Blood_NEU_LYM_Ratio, ifelse( redcap_event_name == "visite_2_arm_1", V2_Blood_NEU_LYM_Ratio,NA) ),
+           BloodMON_Abso = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodMON_Abso, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodMON_Abso,NA) ),
+           BloodMON_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodMON_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodMON_PORC,NA) ),
+           BloodBAS_Abso = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodBAS_Abso, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodBAS_Abso,NA) ),
+           BloodBAS_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_BloodBAS_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_BloodBAS_PORC,NA) ),
+           CRP = ifelse(  redcap_event_name == "visite_1_arm_1", V1_CRP, ifelse( redcap_event_name == "visite_2_arm_1", V2_CRP,NA) ),
+           PROCAL = ifelse(  redcap_event_name == "visite_1_arm_1", V1_PROCAL, ifelse( redcap_event_name == "visite_2_arm_1", V2_PROCAL,NA) )
+           )%>%
+  dplyr::select(-c(181:192,194:217))
+
+Master <- Master[,c(1:180,309:314,181,315:326,182:308)]
+
+
+
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate(  Spu_TCC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Spu_TCC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Spu_TCC,NA)), 
+           Spu_ACN = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Spu_ACN, ifelse( redcap_event_name == "visite_2_arm_1", V2_Spu_ACN,NA)),
+           Spu_Viab_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Spu_Viab_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Spu_Viab_PORC,NA)),
+           Spu_Bronch_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Spu_Bronch_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Spu_Bronch_PORC,NA)),
+           Spu_Contam_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Spu_Contam_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Spu_Contam_PORC,NA)),
+           Spu_Neu_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Spu_Neu_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Spu_Neu_PORC,NA)),
+           Spu_Lym_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Spu_Lym_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Spu_Lym_PORC,NA)),
+           Spu_Mac_PORC = ifelse(  redcap_event_name == "visite_1_arm_1", V1_Spu_Mac_PORC, ifelse( redcap_event_name == "visite_2_arm_1", V2_Spu_Mac_PORC,NA))
+            )%>%
+  dplyr::select(-c(207:222))
+
+Master <- Master[,c(1:206,311:318,207:310)]
+
+Master$ma_moy_j1 <- ifelse( Master$ma_moy_j1 == "NaN", NA, Master$ma_moy_j1  )
+Master$ma_moy_j2 <- ifelse( Master$ma_moy_j2 == "NaN", NA, Master$ma_moy_j2  )
+Master$ma_moy_j3 <- ifelse( Master$ma_moy_j3 == "NaN", NA, Master$ma_moy_j3  )
+Master$ma_moy_j4 <- ifelse( Master$ma_moy_j4 == "NaN", NA, Master$ma_moy_j4  )
+Master$ma_moy_j5 <- ifelse( Master$ma_moy_j5 == "NaN", NA, Master$ma_moy_j5  )
+Master$ma_moy_j6 <- ifelse( Master$ma_moy_j6 == "NaN", NA, Master$ma_moy_j6  )
+Master$ma_moy_j7 <- ifelse( Master$ma_moy_j7 == "NaN", NA, Master$ma_moy_j7  )
+
+Master <- Master %>%
+  group_by(REDCAP_SEQ_NO) %>%
+  mutate( T2_high_low =  ifelse(first(FeNO) < 25 | first(BloodEOS_Abso) < 0.15,0, ifelse( first(FeNO) >= 25 & first(BloodEOS_Abso) >= 0.15,1,NA)),      
+          T2_hothot_med_lowlow =  ifelse(first(FeNO) < 25 & first(BloodEOS_Abso) < 0.15,0, ifelse( first(FeNO) >= 35 & first(BloodEOS_Abso) >= 0.30,2,1)),
+          Beos_high_0.15  = ifelse(first(BloodEOS_Abso) < 0.15,0, ifelse( first(BloodEOS_Abso) >= 0.15,1,NA)),
+          FeNO_high_25  = ifelse(first(FeNO) < 25 ,0, ifelse( first(FeNO) >= 25 ,1,NA)), 
+          SpEos_High = ifelse(first(SpuEOS_PCT) < 3 ,0, ifelse( first(SpuEOS_PCT) >= 3 ,1,NA)) , 
+          Fev1Down = ifelse(first(Attack_vs_Pre_FEV1_relative_12m) <= -10 ,1,0 ),
+          Paucigranulocytic = ifelse(first(SpuEOS_PCT) < 3 & first(Spu_Neu_PORC) < 64,1,0 ),
+          SpMissing = ifelse( is.na(first(SpuEOS_PCT)) == T, 1,0 ),  
+          Beos_Suppressor = ifelse( n()==1,NA, ifelse( first(BloodEOS_Abso) >= 0.15 & last(na.omit(BloodEOS_Abso)) < 0.1,1,0) ) ,
+          FeNO_Suppressor =  ifelse( n()==1,NA, ifelse( first(FeNO) >= 25 & last(na.omit(FeNO)) < 0.58*first(FeNO),1,0) ) , 
+          SpEos_Suppressor  = ifelse( n()==1,NA,  ifelse( first(SpuEOS_PCT) >= 3 & last(na.omit(SpuEOS_PCT)) < 2,1,0)),
+          Previously_T2high = ifelse( ( first(V1_BloodEOS_Abso_12m) >= 0.15 & first(V1_FeNO_12m) >= 25),1,0),
+          V3_V1_ACQ5 =  ifelse(  n() == 1, NA, last(na.omit(v90_acq5_moy),2) - first(acq5_moy) )  )
+
+write.xlsx(Master, "MasterFile.test.xlsx")
+
+```
